@@ -277,7 +277,7 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
 }
 
 // --- Step 9: Implement Routing Algorithm --- 
-const ROUTE_FINDING_TIMEOUT_MS = 15000; // 15 seconds max search time
+const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds max search time (Increased from 15s)
 const LENGTH_TOLERANCE_PERCENT = 0.10; // +/- 10%
 const MAX_ROUTES_TO_FIND = 5;
 
