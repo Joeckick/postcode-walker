@@ -347,6 +347,11 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
         console.log(`Found starting node: ${startNodeId}. Distance from postcode location: ${minDistance.toFixed(1)}m`); // Log the distance
          document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Closest node is ${minDistance.toFixed(1)}m away.</p>`; // Add distance info
         
+        // --- Log Start Node Neighbors ---
+        console.log(`%cDEBUG: Neighbors of Start Node (${startNodeId}):`, 'background: #eee; color: black;');
+        console.log(graph[startNodeId] || 'No neighbors found in graph object!');
+        // --- End Log ---
+
         // --- DEBUG: Visualize the graph --- 
         _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon
 
