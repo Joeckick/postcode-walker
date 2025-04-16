@@ -128,19 +128,27 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
         const osmData = await response.json();
         console.log("Received OSM data:", osmData);
 
-        if (osmData.elements && osmData.elements.length > 0) {
-             document.getElementById('results').innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Next step: Process data and find routes.</p>`;
-             // Pass lat, lon, and desiredLengthMeters
-             processOsmData(osmData, lat, lon, parseInt(desiredLengthMeters)); // Ensure length is number
+        // Add validation for osmData.elements before proceeding
+        if (osmData && Array.isArray(osmData.elements)) {
+            if (osmData.elements.length > 0) {
+                 document.getElementById('results').innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Next step: Process data and find routes.</p>`;
+                 processOsmData(osmData, lat, lon, parseInt(desiredLengthMeters)); 
+            } else {
+                 document.getElementById('results').innerHTML += '<p>No map features (paths, roads) found in the Overpass response for this area.</p>';
+                 alert("Map data received, but it contained no usable paths for this specific area.");
+            }
         } else {
-            document.getElementById('results').innerHTML += '<p>No walkable paths found in the immediate area via Overpass.</p>';
-            alert("Could not find sufficient walking path data in this area. Try a different postcode or adjust length.");
+            // Handle cases where Overpass returns something unexpected (e.g., error message, timeout structure)
+            console.error("Invalid or unexpected data structure received from Overpass API:", osmData);
+            document.getElementById('results').innerHTML += '<p>Error: Received invalid map data structure.</p>';
+            alert("Failed to process map data. Unexpected response from Overpass API.");
         }
 
     } catch (error) {
         console.error("Error fetching or processing Overpass data:", error);
         document.getElementById('results').innerHTML += '<p>Error fetching walking path data.</p>';
-        alert(`An error occurred while fetching map data: ${error.message}. The Overpass API might be busy. Please try again later.`);
+        // Use error.message which might contain the 'ways is not defined' detail
+        alert(`An error occurred while fetching map data: ${error.message}. The Overpass API might be busy. Please try again later.`); 
     }
 }
 
@@ -177,53 +185,72 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
 
     const graph = {}; // Adjacency list: { nodeId: [ { neighborId: ..., length: ..., geometry: [[lon, lat], ...] }, ... ] }
 
-    // Identify intersections (nodes used by >1 way) or endpoints (nodes used by 1 way at the end)
-    const significantNodeIds = new Set();
-    ways.forEach(way => {
-        way.nodes.forEach((nodeId, index) => {
-            if (nodeUsage[nodeId] > 1 || index === 0 || index === way.nodes.length - 1) {
-                significantNodeIds.add(nodeId);
-            }
-        });
-    });
-
-    // Build edges between significant nodes
-    ways.forEach(way => {
-        let segmentStartNodeId = null;
-        let currentSegmentCoords = [];
-
-        way.nodes.forEach((nodeId, index) => {
-            const nodeCoords = nodes[nodeId];
-            if (!nodeCoords) return; // Skip if node data is missing
-
-            currentSegmentCoords.push([nodeCoords.lon, nodeCoords.lat]);
-
-            // If this node is significant, it marks the end of a segment
-            if (significantNodeIds.has(nodeId)) {
-                if (segmentStartNodeId !== null && segmentStartNodeId !== nodeId) { // We have a valid segment
-                    if (currentSegmentCoords.length >= 2) {
-                        try {
-                            const line = turf.lineString(currentSegmentCoords);
-                            const length = turf.length(line, { units: 'meters' });
-
-                            // Add edge in both directions
-                            if (!graph[segmentStartNodeId]) graph[segmentStartNodeId] = [];
-                            if (!graph[nodeId]) graph[nodeId] = [];
-
-                            graph[segmentStartNodeId].push({ neighborId: nodeId, length: length, geometry: currentSegmentCoords });
-                            graph[nodeId].push({ neighborId: segmentStartNodeId, length: length, geometry: currentSegmentCoords.slice().reverse() }); // Reverse for the other direction
-
-                        } catch (e) {
-                            console.error(`Turf error processing segment ${segmentStartNodeId}-${nodeId}:`, e);
-                        }
+    // Wrap main processing loops in try...catch
+    try {
+        // Identify intersections 
+        const significantNodeIds = new Set();
+        ways.forEach(way => {
+            // Check if way.nodes exists and is an array
+            if (way && Array.isArray(way.nodes)) {
+                way.nodes.forEach((nodeId, index) => {
+                    if (nodeUsage[nodeId] > 1 || index === 0 || index === way.nodes.length - 1) {
+                        significantNodeIds.add(nodeId);
                     }
-                }
-                // Start the next segment
-                segmentStartNodeId = nodeId;
-                currentSegmentCoords = [[nodeCoords.lon, nodeCoords.lat]]; // Start new segment with current node
+                });
+            } else {
+                console.warn("Skipping way with missing or invalid nodes property:", way);
             }
         });
-    });
+
+        // Build edges between significant nodes
+        ways.forEach(way => {
+             // Check if way.nodes exists and is an array
+            if (way && Array.isArray(way.nodes)) {
+                let segmentStartNodeId = null;
+                let currentSegmentCoords = [];
+                way.nodes.forEach((nodeId, index) => {
+                    const nodeCoords = nodes[nodeId];
+                    if (!nodeCoords) return; // Skip if node data is missing
+
+                    currentSegmentCoords.push([nodeCoords.lon, nodeCoords.lat]);
+
+                    // If this node is significant, it marks the end of a segment
+                    if (significantNodeIds.has(nodeId)) {
+                        if (segmentStartNodeId !== null && segmentStartNodeId !== nodeId) { // We have a valid segment
+                            if (currentSegmentCoords.length >= 2) {
+                                try {
+                                    const line = turf.lineString(currentSegmentCoords);
+                                    const length = turf.length(line, { units: 'meters' });
+
+                                    // Add edge in both directions
+                                    if (!graph[segmentStartNodeId]) graph[segmentStartNodeId] = [];
+                                    if (!graph[nodeId]) graph[nodeId] = [];
+
+                                    graph[segmentStartNodeId].push({ neighborId: nodeId, length: length, geometry: currentSegmentCoords });
+                                    graph[nodeId].push({ neighborId: segmentStartNodeId, length: length, geometry: currentSegmentCoords.slice().reverse() }); // Reverse for the other direction
+
+                                } catch (e) {
+                                    // Catch Turf.js errors specifically
+                                    console.error(`Turf error processing segment ${segmentStartNodeId}-${nodeId}:`, e, currentSegmentCoords);
+                                }
+                            }
+                        }
+                        // Start the next segment
+                        segmentStartNodeId = nodeId;
+                        currentSegmentCoords = [[nodeCoords.lon, nodeCoords.lat]]; // Start new segment with current node
+                    }
+                });
+            } else {
+                 console.warn("Skipping way with missing or invalid nodes property during edge building:", way);
+            }
+        });
+
+    } catch (error) {
+        console.error("Error during graph construction loops:", error);
+        document.getElementById('results').innerHTML += '<p>Error building path network graph.</p>';
+        alert(`Error processing map paths: ${error.message}`);
+        return; // Stop processing if graph building fails
+    }
 
     const graphNodeCount = Object.keys(graph).length;
     const graphEdgeCount = Object.values(graph).reduce((sum, edges) => sum + edges.length, 0) / 2;
