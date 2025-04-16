@@ -3,6 +3,9 @@ console.log("Script loaded.");
 // Define map variable in a higher scope
 let map;
 
+// Define globally or in a higher scope to keep track of route layers
+let drawnRouteLayers = [];
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM fully loaded and parsed");
 
@@ -295,6 +298,10 @@ async function findWalkRoutes(graph, startNodeId, targetLength) {
 
     let iterations = 0;
 
+    // Clear previous routes from map and list before starting search
+    clearRoutes();
+    document.getElementById('results').innerHTML = '<p>Starting route search...</p>'; // Reset results area
+
     while (stack.length > 0) {
         iterations++;
         if (iterations % 1000 === 0) { 
@@ -354,19 +361,73 @@ async function findWalkRoutes(graph, startNodeId, targetLength) {
     console.log(`Route search finished in ${endTime - startTime}ms. Found ${foundRoutes.length} routes.`);
 
     if (foundRoutes.length > 0) {
-        document.getElementById('results').innerHTML += `<h3>Found ${foundRoutes.length} route(s):</h3><ul>`; // Start list
+        document.getElementById('results').innerHTML += `<h3>Found ${foundRoutes.length} route(s):</h3><ul>`;
         foundRoutes.forEach((route, index) => {
             console.log(`Route ${index + 1}: Length=${route.length.toFixed(0)}m, Nodes=${route.path.length}`);
              document.getElementById('results').innerHTML += `<li>Route ${index + 1}: ${route.length.toFixed(0)}m</li>`;
-             // --- TODO: Draw route on map (Step 11) ---
-             // drawRoute(route); 
+             // --- Draw route on map (Step 11) ---
+             drawRoute(route, index); // Pass index for potential color variation
         });
-         document.getElementById('results').innerHTML += `</ul>`; // End list
+         document.getElementById('results').innerHTML += `</ul>`;
     } else {
          document.getElementById('results').innerHTML += `<p>No suitable loops found within the time limit and criteria.</p>`;
          // Only alert if no routes found and no timeout message was already shown
          if (Date.now() - startTime < ROUTE_FINDING_TIMEOUT_MS) {
             alert("Could not find any walking loops matching your criteria. Try changing the length or postcode, or the area might be too complex.");
          }
+    }
+}
+
+// Function to clear existing routes from the map
+function clearRoutes() {
+    drawnRouteLayers.forEach(layer => map.removeLayer(layer));
+    drawnRouteLayers = [];
+    // Optionally clear the results list too, or handle it where search starts
+    // document.getElementById('results').innerHTML = '<h2>Results</h2>';
+}
+
+// Implement the drawRoute function
+function drawRoute(route, index) {
+    if (!route || !route.geometry || route.geometry.length === 0) {
+        console.error("Invalid route data for drawing:", route);
+        return;
+    }
+
+    // Combine geometry segments into a single coordinate array
+    // Segments are [[lon, lat], [lon, lat], ...]
+    let fullCoords = [];
+    route.geometry.forEach((segment, segmentIndex) => {
+        // First segment: add all points
+        // Subsequent segments: skip the first point (it's the same as the last point of the previous segment)
+        const pointsToAdd = segmentIndex === 0 ? segment : segment.slice(1);
+        fullCoords = fullCoords.concat(pointsToAdd);
+    });
+
+    // Convert to Leaflet's [lat, lon] format
+    const leafletCoords = fullCoords.map(coord => [coord[1], coord[0]]);
+
+    if (leafletCoords.length >= 2) {
+        // Define route colors (add more if needed)
+        const colors = ['#FF0000', '#0000FF', '#008000', '#FFA500', '#800080']; // Red, Blue, Green, Orange, Purple
+        const color = colors[index % colors.length]; // Cycle through colors
+
+        const polyline = L.polyline(leafletCoords, {
+            color: color,
+            weight: 4,
+            opacity: 0.8
+        }).addTo(map);
+
+        // Add popup showing route length
+        polyline.bindPopup(`Route ${index + 1}: ${route.length.toFixed(0)}m`);
+
+        // Store layer to allow clearing later
+        drawnRouteLayers.push(polyline);
+
+        // Optionally fit map view to the first route found
+        if (index === 0) {
+            map.fitBounds(polyline.getBounds());
+        }
+    } else {
+        console.warn(`Route ${index + 1} has insufficient coordinates to draw.`);
     }
 } 
