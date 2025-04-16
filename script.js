@@ -298,6 +298,13 @@ function findSortedIndex(array, element) {
 // A* Search Implementation
 async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startLon) {
     console.log(`Starting A* route search from node ${startNodeId} for target length ${targetLength}m`);
+    console.log(`Received graph nodes: ${Object.keys(graph).length}, startNodeId: ${startNodeId}, targetLength: ${targetLength}, startLat: ${startLat}, startLon: ${startLon}`); // Log input parameters
+    
+    if (!graph || Object.keys(graph).length === 0 || !startNodeId || !targetLength || !startLat || !startLon) {
+        console.error("findWalkRoutes called with invalid parameters!");
+        return;
+    }
+
     const startTime = Date.now();
     const foundRoutes = [];
 
@@ -314,28 +321,38 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
     const startNodeCoords = [startLon, startLat]; // Assuming startNodeId coords match startLat/startLon passed in
 
     // Priority Queue (min-heap simulation using sorted array)
-    // Stores { nodeId, f, g, path, geometry }
     const openSet = [];
 
     // gScore: cost from start to node
     const gScore = {}; 
-    gScore[startNodeId] = 0;
-
-    // Initial state
-    const initialHeuristic = turf.distance(startPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - 0);
-    openSet.push({ 
-        nodeId: startNodeId, 
-        f: initialHeuristic, // f = g + h = 0 + h
-        g: 0, 
-        path: [startNodeId], 
-        geometry: [] 
-    });
+    
+    try {
+        gScore[startNodeId] = 0;
+        const initialHeuristic = turf.distance(startPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - 0);
+        openSet.push({ 
+            nodeId: startNodeId, 
+            f: initialHeuristic, 
+            g: 0, 
+            path: [startNodeId], 
+            geometry: [] 
+        });
+    } catch (error) {
+        console.error("Error during A* initialization:", error);
+        document.getElementById('results').innerHTML += '<p>Error initializing route search.</p>';
+        return; // Exit if initialization fails
+    }
 
     let iterations = 0;
     let prunedNodesCount = 0; 
 
     clearRoutes();
     document.getElementById('results').innerHTML = '<p>Starting route search (A*)...</p>';
+
+    console.log("A* Search: Initial openSet state:", JSON.stringify(openSet)); // Log initial openSet
+    if(openSet.length === 0) {
+        console.error("A* Search: openSet is empty before starting loop!");
+        return;
+    }
 
     while (openSet.length > 0) {
         iterations++;
