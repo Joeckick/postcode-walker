@@ -1,0 +1,19 @@
+/* Basic styles - will be expanded later */
+#map {
+    height: 500px; /* Give the map container a height */
+    width: 100%;
+    margin-top: 20px;
+    border: 1px solid #ccc;
+}
+
+body {
+    font-family: sans-serif;
+}
+
+div {
+    margin-bottom: 10px;
+}
+
+label {
+    margin-right: 5px;
+} 

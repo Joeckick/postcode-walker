@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Postcode Walker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+     crossorigin=""/>
+    <link rel="stylesheet" href="style.css">
+    <!-- Add Leaflet CSS here later -->
+</head>
+<body>
+    <h1>Postcode Walker</h1>
+
+    <div>
+        <label for="postcode">Enter UK Postcode:</label>
+        <input type="text" id="postcode" name="postcode">
+    </div>
+
+    <div>
+        <label for="length">Desired Walk Length (meters):</label>
+        <input type="number" id="length" name="length" value="5000">
+    </div>
+
+    <button id="find-routes-btn">Find Walks</button>
+
+    <div id="map"></div>
+
+    <div id="results">
+        <h2>Results</h2>
+        <!-- Route information will go here -->
+    </div>
+
+    <!-- Add Leaflet JS here later -->
+    <!-- Make sure you put this AFTER Leaflet's CSS -->
+     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+       crossorigin=""></script>
+    <script src="script.js"></script>
+</body>
+</html> 
