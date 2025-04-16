@@ -154,9 +154,11 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
 }
 
 // Function to draw the constructed graph for debugging
-function _debugDrawGraph(graph, nodes) {
+function _debugDrawGraph(graph, nodes, startLat, startLon) {
     console.log("Debugging: Drawing graph nodes and edges...");
     const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
+    const nearStartThresholdMeters = 50; // Define distance threshold
+    const startPoint = turf.point([startLon, startLat]);
 
     // Use a FeatureGroup to add debug layers together for easier management/removal if needed
     const debugLayerGroup = L.featureGroup().addTo(map);
@@ -168,14 +170,29 @@ function _debugDrawGraph(graph, nodes) {
 
         // Draw node marker
         if (nodeData) {
-            const marker = L.circleMarker([nodeData.lat, nodeData.lon], {
+            let markerOptions = {
                 radius: 3,
-                color: '#ff00ff', // Magenta nodes
+                color: '#ff00ff', // Default: Magenta nodes
                 fillOpacity: 0.8
-            });//.addTo(debugLayerGroup);
-             marker.bindPopup(`Node: ${nodeId}`);
-             drawnRouteLayers.push(marker); 
-             debugLayerGroup.addLayer(marker); // Add to group
+            };
+
+            // Check distance from start
+            try {
+                const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
+                const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
+
+                if (distance <= nearStartThresholdMeters) {
+                    markerOptions.color = '#ff0000'; // Red nodes near start
+                    markerOptions.radius = 5;      // Make them slightly larger
+                }
+            } catch(e) {
+                console.warn(`Turf error calculating distance for node ${nodeId}:`, e);
+            }
+
+            const marker = L.circleMarker([nodeData.lat, nodeData.lon], markerOptions);
+            marker.bindPopup(`Node: ${nodeId}`);
+            drawnRouteLayers.push(marker);
+            debugLayerGroup.addLayer(marker); // Add to group
         }
 
         // Draw edges originating from this node
@@ -331,7 +348,7 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
          document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}).</p>`;
         
         // --- DEBUG: Visualize the graph --- 
-        _debugDrawGraph(graph, nodes); // Re-enable debug drawing
+        _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon
 
         console.log("Attempting to call findWalkRoutes..."); // Log before call
         try {
