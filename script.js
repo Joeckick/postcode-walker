@@ -292,9 +292,9 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
          document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}).</p>`;
         
         // --- DEBUG: Visualize the graph --- 
-        // _debugDrawGraph(graph, nodes); // Temporarily disable debug drawing to reduce noise
+        _debugDrawGraph(graph, nodes); // Re-enable debug drawing
 
-        console.log("Attempting to call findWalkRoutes...");
+        console.log("Attempting to call findWalkRoutes..."); // Log before call
         try {
              findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon);
              console.log("findWalkRoutes call apparently completed."); // Changed message slightly
@@ -417,6 +417,10 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         // if(iterations % 200 === 0) console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, openSet size: ${openSet.length}`);
         // More detailed log
         console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, pathLen=${current.path.length}, openSet: ${openSet.length}`);
+        // Log the actual path periodically
+        if(iterations % 100 === 0 || current.path.length > 15) { // Log every 100 iter or if path gets long
+            console.log(` -> Path: ${current.path.join(' -> ')}`);
+        }
 
         // Get current node's coordinates (needed for distance pruning and heuristic)
         // This relies on the geometry stored in the graph edges
@@ -729,9 +733,9 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
          document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}).</p>`;
         
         // --- DEBUG: Visualize the graph --- 
-        // _debugDrawGraph(graph, nodes); // Temporarily disable debug drawing to reduce noise
+        _debugDrawGraph(graph, nodes); // Re-enable debug drawing
 
-        console.log("Attempting to call findWalkRoutes...");
+        console.log("Attempting to call findWalkRoutes..."); // Log before call
         try {
              findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon);
              console.log("findWalkRoutes call apparently completed."); // Changed message slightly
