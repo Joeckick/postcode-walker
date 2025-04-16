@@ -353,7 +353,7 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
         // --- End Log ---
 
         // --- DEBUG: Visualize the graph --- 
-        _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon
+        // _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon // <<< COMMENTED OUT FOR DEBUGGING
 
         console.log("Attempting to call findWalkRoutes..."); // Log before call
         try {
@@ -459,19 +459,13 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
     while (openSet.length > 0) {
         iterations++;
-        if (iterations % 500 === 0) { // Check timeout less often maybe?
-            const elapsedTime = Date.now() - startTime;
-            if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
-                console.warn(`A* Route finding timed out after ${elapsedTime}ms`);
-                document.getElementById('results').innerHTML += '<p>Route search timed out (A*).</p>';
-                break; 
-            }
-            // Sort openSet periodically to keep it roughly ordered if insertion sort is too slow
-            // openSet.sort((a, b) => a.f - b.f);
-        }
+        console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Simple log
+        console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Log simplified openSet state
 
         // Get node with the lowest f score (from the start of the sorted array)
         const current = openSet.shift(); 
+        console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Log shifted node
+
         const currentNodeId = current.nodeId;
         const currentG = current.g;
 
