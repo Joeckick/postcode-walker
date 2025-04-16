@@ -529,7 +529,6 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
             }
              // Continue searching for other loops even if one is found
              // But don't explore neighbors from the start node once a loop is completed this way
-             continue; 
         }
 
         // --- Explore Neighbors --- 
