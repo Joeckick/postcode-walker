@@ -537,6 +537,11 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
             console.log(`  --> Considering neighbor ${neighborId} (Edge Length: ${edgeLength.toFixed(0)}, Tentative gScore: ${tentativeGScore.toFixed(0)})`); // Log neighbor consideration
 
+            // Specific check if neighbor is the start node
+            if (neighborId === startNodeId) {
+                 console.log(`%c      Neighbor IS the start node (${startNodeId})! Current path length: ${current.path.length}`, 'color: blue; font-style: italic;');
+            }
+
             // Pruning based on path length
             if (tentativeGScore > absoluteMaxLength) {
                  console.log(`      Pruning neighbor ${neighborId}: Path too long (${tentativeGScore.toFixed(0)} > ${absoluteMaxLength.toFixed(0)})`);
