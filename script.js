@@ -72,6 +72,7 @@ async function findRoutes() {
             document.getElementById('results').innerHTML = `<p>Found location for ${data.result.postcode}. Next step: Fetch map data.</p>`;
 
             // --- TODO: Call function to fetch Overpass data here --- 
+            fetchOsmData(latitude, longitude, length);
 
         } else {
             console.error("Postcode not found or invalid:", data.error);
@@ -86,4 +87,64 @@ async function findRoutes() {
 
     // Placeholder: Alert the user
     // alert("Route finding not implemented yet."); // Remove or comment out this line
+}
+
+async function fetchOsmData(lat, lon, desiredLengthMeters) {
+    console.log(`Fetching OSM data around ${lat}, ${lon} for length ${desiredLengthMeters}m`);
+    document.getElementById('results').innerHTML += '<p>Fetching walking paths data...</p>';
+
+    // Calculate search radius - desired length / 2 plus a buffer (e.g., 500m)
+    // Ensure radius is reasonable, e.g., at least 1000m
+    const radius = Math.max(1000, (desiredLengthMeters / 2) + 500);
+    console.log(`Using Overpass search radius: ${radius}m`);
+
+    // Overpass query to find walkable ways
+    // We look for common walkable highway types
+    const query = `
+        [out:json][timeout:30];
+        (
+          way
+            ["highway"~"^(footway|path|pedestrian|track|residential|living_street|service|unclassified|tertiary)$"]
+            (around:${radius},${lat},${lon});
+          // Optionally add ways explicitly tagged for foot traffic
+          // way["foot"="yes"](around:${radius},${lat},${lon});
+        );
+        out body;
+        >;
+        out skel qt;
+    `;
+    // Note: "out skel qt;" is efficient for getting nodes and ways needed for geometry
+    // Using POST is recommended for larger queries
+    const overpassUrl = 'https://overpass-api.de/api/interpreter';
+
+    try {
+        const response = await fetch(overpassUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: `data=${encodeURIComponent(query)}`
+        });
+
+        if (!response.ok) {
+            throw new Error(`Overpass API request failed: ${response.status} ${response.statusText}`);
+        }
+
+        const osmData = await response.json();
+        console.log("Received OSM data:", osmData);
+
+        // Basic check if we got any elements
+        if (osmData.elements && osmData.elements.length > 0) {
+             document.getElementById('results').innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Next step: Process data and find routes.</p>`;
+            // --- TODO: Call function to process OSM data and build graph --- 
+        } else {
+            document.getElementById('results').innerHTML += '<p>No walkable paths found in the immediate area via Overpass.</p>';
+            alert("Could not find sufficient walking path data in this area. Try a different postcode or adjust length.");
+        }
+
+    } catch (error) {
+        console.error("Error fetching or processing Overpass data:", error);
+        document.getElementById('results').innerHTML += '<p>Error fetching walking path data.</p>';
+        alert(`An error occurred while fetching map data: ${error.message}. The Overpass API might be busy. Please try again later.`);
+    }
 } 
