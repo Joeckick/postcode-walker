@@ -281,130 +281,178 @@ const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds max search time (Increased
 const LENGTH_TOLERANCE_PERCENT = 0.10; // +/- 10%
 const MAX_ROUTES_TO_FIND = 5;
 
+// Function to find the index to insert into a sorted array (by f score)
+function findSortedIndex(array, element) {
+    let low = 0, high = array.length;
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (array[mid].f < element.f) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low;
+}
+
+// A* Search Implementation
 async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startLon) {
-    console.log(`Starting route search from node ${startNodeId} for target length ${targetLength}m`);
+    console.log(`Starting A* route search from node ${startNodeId} for target length ${targetLength}m`);
     const startTime = Date.now();
     const foundRoutes = [];
 
     const minLength = targetLength * (1 - LENGTH_TOLERANCE_PERCENT);
     const maxLength = targetLength * (1 + LENGTH_TOLERANCE_PERCENT);
-    const absoluteMaxLength = targetLength * 1.5; // Prune paths significantly longer
+    // We might relax the absolute max length slightly for A*
+    const absoluteMaxLength = targetLength * 1.75;
 
-    // Maximum allowed straight-line distance from the start point (as a fraction of target length)
-    // This is a key pruning parameter - adjust if needed
-    const MAX_DISTANCE_FACTOR = 0.75; // 75% of target length
+    const MAX_DISTANCE_FACTOR = 0.75; 
     const maxAllowedDistance = targetLength * MAX_DISTANCE_FACTOR;
     console.log(`Max allowed straight-line distance from start: ${maxAllowedDistance.toFixed(0)}m`);
 
-    // Create a turf point for the start location (used for distance calculations)
     const startPoint = turf.point([startLon, startLat]);
+    const startNodeCoords = [startLon, startLat]; // Assuming startNodeId coords match startLat/startLon passed in
 
-    // Stack for iterative DFS: [currentNodeId, pathArray, visitedEdgesSet, currentLength, geometryArray]
-    const stack = [];
+    // Priority Queue (min-heap simulation using sorted array)
+    // Stores { nodeId, f, g, path, geometry }
+    const openSet = [];
+
+    // gScore: cost from start to node
+    const gScore = {}; 
+    gScore[startNodeId] = 0;
 
     // Initial state
-    stack.push([startNodeId, [startNodeId], new Set(), 0, []]);
+    const initialHeuristic = turf.distance(startPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - 0);
+    openSet.push({ 
+        nodeId: startNodeId, 
+        f: initialHeuristic, // f = g + h = 0 + h
+        g: 0, 
+        path: [startNodeId], 
+        geometry: [] 
+    });
 
     let iterations = 0;
-    let prunedNodesCount = 0; // Keep track of nodes pruned due to distance
+    let prunedNodesCount = 0; 
 
-    // Clear previous routes from map and list before starting search
     clearRoutes();
-    document.getElementById('results').innerHTML = '<p>Starting route search...</p>'; // Reset results area
+    document.getElementById('results').innerHTML = '<p>Starting route search (A*)...</p>';
 
-    while (stack.length > 0) {
+    while (openSet.length > 0) {
         iterations++;
-        if (iterations % 1000 === 0) { 
+        if (iterations % 500 === 0) { // Check timeout less often maybe?
             const elapsedTime = Date.now() - startTime;
             if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
-                console.warn(`Route finding timed out after ${elapsedTime}ms`);
-                document.getElementById('results').innerHTML += '<p>Route search timed out (complex area or length).</p>';
+                console.warn(`A* Route finding timed out after ${elapsedTime}ms`);
+                document.getElementById('results').innerHTML += '<p>Route search timed out (A*).</p>';
                 break; 
             }
+            // Sort openSet periodically to keep it roughly ordered if insertion sort is too slow
+            // openSet.sort((a, b) => a.f - b.f);
         }
 
-        const [currentNodeId, currentPath, visitedEdges, currentLength, currentGeometry] = stack.pop();
+        // Get node with the lowest f score (from the start of the sorted array)
+        const current = openSet.shift(); 
+        const currentNodeId = current.nodeId;
+        const currentG = current.g;
 
-        // --- Distance-based pruning: Check if current node is too far from the start ---
-        const nodeData = graph[currentNodeId];
-        if (nodeData && nodeData.length > 0 && nodeData[0].geometry) {
-            // Get the coordinates of the current node (first point of the first edge's geometry)
-            const coords = nodeData[0].geometry[0];
-            if (coords && coords.length >= 2) {
-                const currentPoint = turf.point([coords[0], coords[1]]);
-                const distanceToStart = turf.distance(startPoint, currentPoint, { units: 'meters' });
-                
-                // If the node is too far from the start in a straight line, don't explore it further
-                if (distanceToStart > maxAllowedDistance) {
-                    prunedNodesCount++;
-                    if (prunedNodesCount % 100 === 0) {
-                        console.log(`Pruned ${prunedNodesCount} nodes due to distance threshold.`);
-                    }
-                    continue; // Skip to the next node in the stack
-                }
+        // Get current node's coordinates (needed for distance pruning and heuristic)
+        // This relies on the geometry stored in the graph edges
+        let currentNodeCoords = startNodeCoords; // Default to start coords
+        if (current.geometry.length > 0) {
+            const lastSegment = current.geometry[current.geometry.length - 1];
+            if (lastSegment && lastSegment.length > 0) {
+                 currentNodeCoords = lastSegment[lastSegment.length - 1]; // Last point of last segment
             }
         }
+        const currentPoint = turf.point(currentNodeCoords);
 
+        // --- Distance-based pruning ---
+        const distanceToStart = turf.distance(startPoint, currentPoint, { units: 'meters' });
+        if (distanceToStart > maxAllowedDistance && currentNodeId !== startNodeId) { // Don't prune start node
+            prunedNodesCount++;
+            if (prunedNodesCount % 100 === 0) console.log(`Pruned ${prunedNodesCount} nodes due to distance.`);
+            continue; 
+        }
+
+        // --- Goal Check --- 
+        if (currentNodeId === startNodeId && current.path.length > 1) {
+            if (currentG >= minLength && currentG <= maxLength) {
+                const route = { length: currentG, path: current.path, geometry: current.geometry };
+                foundRoutes.push(route);
+                console.log(`A* Found route: Length ${currentG.toFixed(0)}m`);
+                document.getElementById('results').innerHTML += `<p>Found potential route: ${currentG.toFixed(0)}m</p>`;
+                if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
+                    console.log(`A* Found maximum number of routes (${MAX_ROUTES_TO_FIND}).`);
+                    break; // Exit main while loop
+                }
+            }
+             // Continue searching for other loops even if one is found
+             // But don't explore neighbors from the start node once a loop is completed this way
+             continue; 
+        }
+
+        // --- Explore Neighbors --- 
         const neighbors = graph[currentNodeId] || [];
         for (const edge of neighbors) {
             const neighborId = edge.neighborId;
             const edgeLength = edge.length;
             const edgeGeometry = edge.geometry;
-            const newLength = currentLength + edgeLength;
+            const tentativeGScore = currentG + edgeLength;
 
-            // --- Pruning and Checks ---
-            if (newLength > absoluteMaxLength) continue;
+            // Pruning based on path length
+            if (tentativeGScore > absoluteMaxLength) continue;
 
-            if (currentPath.length > 1 && neighborId === currentPath[currentPath.length - 2]) continue; // Prevent immediate U-turn
+            // Simple U-turn prevention
+            if (current.path.length > 1 && neighborId === current.path[current.path.length - 2]) continue;
 
-             if (neighborId === startNodeId && currentPath.length >= 2) { 
-                 if (newLength >= minLength && newLength <= maxLength) {
-                     const route = {
-                         length: newLength,
-                         path: [...currentPath, neighborId],
-                         geometry: [...currentGeometry, edgeGeometry]
-                     };
-                     foundRoutes.push(route);
-                     console.log(`Found route: Length ${newLength.toFixed(0)}m`);
-                     document.getElementById('results').innerHTML += `<p>Found potential route: ${newLength.toFixed(0)}m</p>`;
+            // Check if this path to neighbor is better than any previous one
+            if (tentativeGScore < (gScore[neighborId] || Infinity)) {
+                gScore[neighborId] = tentativeGScore;
 
-                     if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
-                         stack.length = 0; 
-                         console.log(`Found maximum number of routes (${MAX_ROUTES_TO_FIND}).`);
-                         break;
-                     }
-                 }
-                 continue; 
-             }
+                // Get neighbor coordinates for heuristic (last point of edge geometry)
+                let neighborCoords = currentNodeCoords;
+                if (edgeGeometry && edgeGeometry.length > 0) {
+                    neighborCoords = edgeGeometry[edgeGeometry.length - 1];
+                }
+                const neighborPoint = turf.point(neighborCoords);
+                
+                // Heuristic calculation
+                const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - tentativeGScore);
+                const f = tentativeGScore + h;
 
-            // --- Prepare for next step ---
-            const newPath = [...currentPath, neighborId];
-            const newVisitedEdges = new Set(visitedEdges); 
-            const newGeometry = [...currentGeometry, edgeGeometry];
+                const newPath = [...current.path, neighborId];
+                const newGeometry = [...current.geometry, edgeGeometry];
+                
+                const newState = {
+                    nodeId: neighborId,
+                    f: f,
+                    g: tentativeGScore,
+                    path: newPath,
+                    geometry: newGeometry
+                };
 
-            stack.push([neighborId, newPath, newVisitedEdges, newLength, newGeometry]);
+                // Insert into sorted openSet
+                const index = findSortedIndex(openSet, newState);
+                openSet.splice(index, 0, newState);
+            }
         }
-         if (foundRoutes.length >= MAX_ROUTES_TO_FIND) break; 
     }
 
     const endTime = Date.now();
-    console.log(`Route search finished in ${endTime - startTime}ms. Found ${foundRoutes.length} routes.`);
-
+    console.log(`A* Route search finished in ${endTime - startTime}ms. Found ${foundRoutes.length} routes.`);
     if (foundRoutes.length > 0) {
-        document.getElementById('results').innerHTML += `<h3>Found ${foundRoutes.length} route(s):</h3><ul>`;
+        document.getElementById('results').innerHTML += `<h3>Found ${foundRoutes.length} route(s) using A*:</h3><ul>`;
         foundRoutes.forEach((route, index) => {
             console.log(`Route ${index + 1}: Length=${route.length.toFixed(0)}m, Nodes=${route.path.length}`);
-             document.getElementById('results').innerHTML += `<li>Route ${index + 1}: ${route.length.toFixed(0)}m</li>`;
-             // --- Draw route on map (Step 11) ---
-             drawRoute(route, index); // Pass index for potential color variation
+            document.getElementById('results').innerHTML += `<li>Route ${index + 1}: ${route.length.toFixed(0)}m</li>`;
+            drawRoute(route, index);
         });
-         document.getElementById('results').innerHTML += `</ul>`;
+        document.getElementById('results').innerHTML += `</ul>`;
     } else {
-         document.getElementById('results').innerHTML += `<p>No suitable loops found within the time limit and criteria.</p>`;
-         // Only alert if no routes found and no timeout message was already shown
-         if (Date.now() - startTime < ROUTE_FINDING_TIMEOUT_MS) {
-            alert("Could not find any walking loops matching your criteria. Try changing the length or postcode, or the area might be too complex.");
-         }
+        document.getElementById('results').innerHTML += `<p>No suitable loops found with A* within the time limit and criteria.</p>`;
+        if (Date.now() - startTime < ROUTE_FINDING_TIMEOUT_MS) {
+            alert("Could not find any walking loops matching your criteria using A*. Try changing length/postcode.");
+        }
     }
 }
 
