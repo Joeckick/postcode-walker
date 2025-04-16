@@ -555,9 +555,9 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                  continue;
             }
 
-            // Simple U-turn prevention
-            if (current.path.length > 1 && neighborId === current.path[current.path.length - 2]) {
-                 console.log(`      Pruning neighbor ${neighborId}: Immediate U-turn`);
+            // Simple U-turn prevention - Allow returning to start node
+            if (current.path.length > 1 && neighborId === current.path[current.path.length - 2] && neighborId !== startNodeId) {
+                 console.log(`      Pruning neighbor ${neighborId}: Immediate U-turn (and not the start node)`);
                  continue;
             }
 
