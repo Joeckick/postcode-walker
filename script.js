@@ -354,6 +354,8 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         const current = openSet.shift(); 
         const currentNodeId = current.nodeId;
         const currentG = current.g;
+        // DEBUG: Log current node
+        if(iterations % 200 === 0) console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, openSet size: ${openSet.length}`);
 
         // Get current node's coordinates (needed for distance pruning and heuristic)
         // This relies on the geometry stored in the graph edges
@@ -376,6 +378,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
         // --- Goal Check --- 
         if (currentNodeId === startNodeId && current.path.length > 1) {
+            console.log(`DEBUG: Reached start node ${startNodeId} with length ${currentG.toFixed(0)}`); // Log goal reach
             if (currentG >= minLength && currentG <= maxLength) {
                 const route = { length: currentG, path: current.path, geometry: current.geometry };
                 foundRoutes.push(route);
@@ -419,6 +422,8 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                 // Heuristic calculation
                 const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - tentativeGScore);
                 const f = tentativeGScore + h;
+                // DEBUG: Log neighbor score
+                // console.log(`  -> Neighbor ${neighborId}: g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`);
 
                 const newPath = [...current.path, neighborId];
                 const newGeometry = [...current.geometry, edgeGeometry];
