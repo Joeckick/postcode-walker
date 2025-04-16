@@ -528,14 +528,15 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                 gScore[neighborId] = tentativeGScore;
 
                 // Get neighbor coordinates for heuristic (last point of edge geometry)
-                let neighborCoords = currentNodeCoords;
-                if (edgeGeometry && edgeGeometry.length > 0) {
-                    neighborCoords = edgeGeometry[edgeGeometry.length - 1];
-                }
-                const neighborPoint = turf.point(neighborCoords);
+                // let neighborCoords = currentNodeCoords;
+                // if (edgeGeometry && edgeGeometry.length > 0) {
+                //     neighborCoords = edgeGeometry[edgeGeometry.length - 1];
+                // }
+                // const neighborPoint = turf.point(neighborCoords);
                 
-                const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}); // Simpler heuristic
-                const f = tentativeGScore + h;
+                // const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}); // Simpler heuristic
+                const h = 0; // Set heuristic to 0 (Dijkstra's algorithm behavior)
+                const f = tentativeGScore + h; // f score is now just the path cost
                 console.log(`      Adding/Updating neighbor ${neighborId}: New g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`); // Log adding state
 
                 const newPath = [...current.path, neighborId];
