@@ -180,8 +180,10 @@ function _debugDrawGraph(graph, nodes, startLat, startLon) {
             try {
                 const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
                 const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
+                console.log(`Node ${nodeId} distance: ${distance.toFixed(1)}m`); // Temporary log
 
                 if (distance <= nearStartThresholdMeters) {
+                    console.log(`Node ${nodeId} is NEAR start (${distance.toFixed(1)}m) - applying red style.`); // Temporary log
                     markerOptions.color = '#ff0000'; // Red nodes near start
                     markerOptions.radius = 5;      // Make them slightly larger
                 }
