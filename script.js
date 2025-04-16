@@ -267,6 +267,9 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
         return;
     }
 
+    // --- DEBUG: Visualize the graph --- 
+    _debugDrawGraph(graph, nodes);
+
     // Store graph and start node for the routing algorithm
     // e.g., window.walkGraph = graph; window.startNodeId = startNodeId;
     // Or pass them to the next function.
@@ -430,4 +433,51 @@ function drawRoute(route, index) {
     } else {
         console.warn(`Route ${index + 1} has insufficient coordinates to draw.`);
     }
+}
+
+// Function to draw the constructed graph for debugging
+function _debugDrawGraph(graph, nodes) {
+    console.log("Debugging: Drawing graph nodes and edges...");
+    const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
+
+    Object.keys(graph).forEach(nodeIdStr => {
+        const nodeId = parseInt(nodeIdStr);
+        const nodeData = nodes[nodeId];
+
+        // Draw node marker
+        if (nodeData) {
+            const marker = L.circleMarker([nodeData.lat, nodeData.lon], {
+                radius: 3,
+                color: '#ff00ff', // Magenta nodes
+                fillOpacity: 0.8
+            }).addTo(map);
+             marker.bindPopup(`Node: ${nodeId}`);
+             drawnRouteLayers.push(marker); // Add marker to layers to be cleared
+        }
+
+        // Draw edges originating from this node
+        const edges = graph[nodeId] || [];
+        edges.forEach(edge => {
+            const neighborId = edge.neighborId;
+
+            // Create a unique key for the edge pair to avoid double drawing
+            const edgeKey = [nodeId, neighborId].sort((a, b) => a - b).join('-');
+
+            if (!drawnEdges.has(edgeKey)) {
+                 if (edge.geometry && edge.geometry.length >= 2) {
+                    const leafletCoords = edge.geometry.map(coord => [coord[1], coord[0]]); // lon,lat -> lat,lon
+                    const polyline = L.polyline(leafletCoords, {
+                        color: '#00ffff', // Cyan edges
+                        weight: 1,
+                        opacity: 0.6
+                    }).addTo(map);
+                    drawnRouteLayers.push(polyline); // Add edge to layers to be cleared
+                    drawnEdges.add(edgeKey);
+                 } else {
+                     console.warn(`Edge ${edgeKey} has invalid geometry:`, edge.geometry);
+                 }
+            }
+        });
+    });
+     console.log(`Debugging: Drawn ${drawnEdges.size} unique graph edges.`);
 } 
