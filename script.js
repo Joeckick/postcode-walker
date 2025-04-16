@@ -245,59 +245,47 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
 
     // Wrap main processing loops in try...catch
     try {
-        // Identify intersections 
-        const significantNodeIds = new Set();
+        // Build graph by connecting consecutive nodes within ways
         ways.forEach(way => {
-            // Check if way.nodes exists and is an array
-            if (way && Array.isArray(way.nodes)) {
-                way.nodes.forEach((nodeId, index) => {
-                    if (nodeUsage[nodeId] > 1 || index === 0 || index === way.nodes.length - 1) {
-                        significantNodeIds.add(nodeId);
-                    }
-                });
-            } else {
-                console.warn("Skipping way with missing or invalid nodes property:", way);
-            }
-        });
+            if (way && Array.isArray(way.nodes) && way.nodes.length >= 2) {
+                for (let i = 0; i < way.nodes.length - 1; i++) {
+                    const node1Id = way.nodes[i];
+                    const node2Id = way.nodes[i+1];
+                    const node1Coords = nodes[node1Id];
+                    const node2Coords = nodes[node2Id];
 
-        // Build edges between significant nodes
-        ways.forEach(way => {
-             // Check if way.nodes exists and is an array
-            if (way && Array.isArray(way.nodes)) {
-                let segmentStartNodeId = null;
-                let currentSegmentCoords = [];
-                way.nodes.forEach((nodeId, index) => {
-                    const nodeCoords = nodes[nodeId];
-                    if (!nodeCoords) return; // Skip if node data is missing
+                    // Ensure both nodes exist
+                    if (node1Coords && node2Coords) {
+                        try {
+                            const point1 = turf.point([node1Coords.lon, node1Coords.lat]);
+                            const point2 = turf.point([node2Coords.lon, node2Coords.lat]);
+                            const length = turf.distance(point1, point2, { units: 'meters' });
 
-                    currentSegmentCoords.push([nodeCoords.lon, nodeCoords.lat]);
+                            // Geometry for this segment
+                            const segmentGeometry = [
+                                [node1Coords.lon, node1Coords.lat],
+                                [node2Coords.lon, node2Coords.lat]
+                            ];
 
-                    // If this node is significant, it marks the end of a segment
-                    if (significantNodeIds.has(nodeId)) {
-                        if (segmentStartNodeId !== null && segmentStartNodeId !== nodeId) { // We have a valid segment
-                            if (currentSegmentCoords.length >= 2) {
-                                try {
-                                    const line = turf.lineString(currentSegmentCoords);
-                                    const length = turf.length(line, { units: 'meters' });
+                            // Add edge in both directions
+                            if (!graph[node1Id]) graph[node1Id] = [];
+                            if (!graph[node2Id]) graph[node2Id] = [];
 
-                                    // Add edge in both directions
-                                    if (!graph[segmentStartNodeId]) graph[segmentStartNodeId] = [];
-                                    if (!graph[nodeId]) graph[nodeId] = [];
-
-                                    graph[segmentStartNodeId].push({ neighborId: nodeId, length: length, geometry: currentSegmentCoords });
-                                    graph[nodeId].push({ neighborId: segmentStartNodeId, length: length, geometry: currentSegmentCoords.slice().reverse() }); // Reverse for the other direction
-
-                                } catch (e) {
-                                    // Catch Turf.js errors specifically
-                                    console.error(`Turf error processing segment ${segmentStartNodeId}-${nodeId}:`, e, currentSegmentCoords);
-                                }
+                            // Check for zero length edges which can cause issues
+                            if (length > 0) {
+                                graph[node1Id].push({ neighborId: node2Id, length: length, geometry: segmentGeometry });
+                                graph[node2Id].push({ neighborId: node1Id, length: length, geometry: segmentGeometry.slice().reverse() });
+                            } else {
+                                console.warn(`Skipping zero-length edge between ${node1Id} and ${node2Id}`);
                             }
+                        } catch (e) {
+                            console.error(`Turf error processing segment between ${node1Id}-${node2Id}:`, e);
                         }
-                        // Start the next segment
-                        segmentStartNodeId = nodeId;
-                        currentSegmentCoords = [[nodeCoords.lon, nodeCoords.lat]]; // Start new segment with current node
                     }
-                });
+                }
+            } else if (way && Array.isArray(way.nodes)) {
+                // Log ways that are too short to form segments
+                // console.log(`Skipping way ${way.id} with less than 2 nodes.`);
             } else {
                  console.warn("Skipping way with missing or invalid nodes property during edge building:", way);
             }
@@ -366,7 +354,7 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
 
 // --- Step 9: Implement Routing Algorithm --- 
 const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds max search time (Increased from 15s)
-const LENGTH_TOLERANCE_PERCENT = 0.10; // +/- 10%
+const LENGTH_TOLERANCE_PERCENT = 0.20; // +/- 20% (Increased from 10%)
 const MAX_ROUTES_TO_FIND = 5;
 
 // Function to find the index to insert into a sorted array (by f score)
