@@ -559,10 +559,21 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                  continue;
             }
 
-            // Check if this path to neighbor is better than any previous one
+            // Check if this path to neighbor is better than any previous one OR if it's returning to the start node
              const existingGScore = gScore[neighborId] || Infinity;
-             if (tentativeGScore < existingGScore) {
-                gScore[neighborId] = tentativeGScore;
+             // Allow adding the start node back even if the path is longer than the initial gScore (0)
+             if (tentativeGScore < existingGScore || neighborId === startNodeId) {
+                 // If it's the start node, we don't necessarily update gScore[startNodeId] (it should remain 0 conceptually for future direct starts)
+                 // But we DO potentially update it for this specific path instance if this is a shorter loop than a previously found one returning here.
+                 // However, the primary goal is to get the state into the openSet for the Goal Check.
+                 if (neighborId !== startNodeId) {
+                    gScore[neighborId] = tentativeGScore;
+                 } else if (tentativeGScore < existingGScore) {
+                     // Update gScore for the start node only if this loop path is somehow shorter than 0? 
+                     // This case seems unlikely/impossible, but keeps the structure. 
+                     // We could also just skip updating gScore[startNodeId] entirely.
+                     gScore[neighborId] = tentativeGScore; 
+                 }
 
                 // Get neighbor coordinates for heuristic (last point of edge geometry)
                 // let neighborCoords = currentNodeCoords;
