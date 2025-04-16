@@ -499,16 +499,26 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
         // --- Goal Check --- 
         if (currentNodeId === startNodeId && current.path.length > 1) {
-            console.log(`DEBUG: Reached start node ${startNodeId} with length ${currentG.toFixed(0)}`); // Log goal reach
+            // DETAILED LOGGING HERE:
+            console.log(`%cDEBUG: Goal Check - Reached start node ${startNodeId}.`, 'color: green; font-weight: bold;');
+            console.log(` -> Path Length (g): ${currentG.toFixed(1)}m`);
+            console.log(` -> Required Range: ${minLength.toFixed(1)}m - ${maxLength.toFixed(1)}m`);
+            console.log(` -> Path Node Count: ${current.path.length}`);
+            // console.log(` -> Path Nodes: ${current.path.join(' -> ')}`); // Potentially very long log
+
+            // console.log(`DEBUG: Reached start node ${startNodeId} with length ${currentG.toFixed(0)}`); // Old log, replaced by detailed logs above
             if (currentG >= minLength && currentG <= maxLength) {
                 const route = { length: currentG, path: current.path, geometry: current.geometry };
                 foundRoutes.push(route);
-                console.log(`A* Found route: Length ${currentG.toFixed(0)}m`);
+                console.log(`%cDEBUG: Goal Check - Length is ACCEPTABLE. Storing route.`, 'color: green;');
+                // console.log(`A* Found route: Length ${currentG.toFixed(0)}m`); // Old log
                 document.getElementById('results').innerHTML += `<p>Found potential route: ${currentG.toFixed(0)}m</p>`;
                 if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
                     console.log(`A* Found maximum number of routes (${MAX_ROUTES_TO_FIND}).`);
                     break; // Exit main while loop
                 }
+            } else {
+                 console.log(`%cDEBUG: Goal Check - Length is UNACCEPTABLE. Discarding path.`, 'color: orange;');
             }
              // Continue searching for other loops even if one is found
              // But don't explore neighbors from the start node once a loop is completed this way
