@@ -414,7 +414,9 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         const currentNodeId = current.nodeId;
         const currentG = current.g;
         // DEBUG: Log current node
-        if(iterations % 200 === 0) console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, openSet size: ${openSet.length}`);
+        // if(iterations % 200 === 0) console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, openSet size: ${openSet.length}`);
+        // More detailed log
+        console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, pathLen=${current.path.length}, openSet: ${openSet.length}`);
 
         // Get current node's coordinates (needed for distance pruning and heuristic)
         // This relies on the geometry stored in the graph edges
@@ -455,20 +457,31 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
         // --- Explore Neighbors --- 
         const neighbors = graph[currentNodeId] || [];
+        console.log(` -> Exploring ${neighbors.length} neighbors of ${currentNodeId}`); // Log neighbor count
+
         for (const edge of neighbors) {
             const neighborId = edge.neighborId;
             const edgeLength = edge.length;
             const edgeGeometry = edge.geometry;
             const tentativeGScore = currentG + edgeLength;
 
+            console.log(`  --> Considering neighbor ${neighborId} (Edge Length: ${edgeLength.toFixed(0)}, Tentative gScore: ${tentativeGScore.toFixed(0)})`); // Log neighbor consideration
+
             // Pruning based on path length
-            if (tentativeGScore > absoluteMaxLength) continue;
+            if (tentativeGScore > absoluteMaxLength) {
+                 console.log(`      Pruning neighbor ${neighborId}: Path too long (${tentativeGScore.toFixed(0)} > ${absoluteMaxLength.toFixed(0)})`);
+                 continue;
+            }
 
             // Simple U-turn prevention
-            if (current.path.length > 1 && neighborId === current.path[current.path.length - 2]) continue;
+            if (current.path.length > 1 && neighborId === current.path[current.path.length - 2]) {
+                 console.log(`      Pruning neighbor ${neighborId}: Immediate U-turn`);
+                 continue;
+            }
 
             // Check if this path to neighbor is better than any previous one
-            if (tentativeGScore < (gScore[neighborId] || Infinity)) {
+             const existingGScore = gScore[neighborId] || Infinity;
+             if (tentativeGScore < existingGScore) {
                 gScore[neighborId] = tentativeGScore;
 
                 // Get neighbor coordinates for heuristic (last point of edge geometry)
@@ -478,12 +491,9 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                 }
                 const neighborPoint = turf.point(neighborCoords);
                 
-                // Heuristic calculation (Simplified: only distance back to start)
-                // const h_complex = turf.distance(neighborPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - tentativeGScore);
                 const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}); // Simpler heuristic
                 const f = tentativeGScore + h;
-                // DEBUG: Log neighbor score
-                // console.log(`  -> Neighbor ${neighborId}: g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`);
+                console.log(`      Adding/Updating neighbor ${neighborId}: New g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`); // Log adding state
 
                 const newPath = [...current.path, neighborId];
                 const newGeometry = [...current.geometry, edgeGeometry];
@@ -499,7 +509,9 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                 // Insert into sorted openSet
                 const index = findSortedIndex(openSet, newState);
                 openSet.splice(index, 0, newState);
-            }
+            } else {
+                 console.log(`      Skipping neighbor ${neighborId}: Worse path found (Existing g=${existingGScore.toFixed(0)}, New g=${tentativeGScore.toFixed(0)})`); // Log skipping due to gScore
+             }
         }
     }
 
