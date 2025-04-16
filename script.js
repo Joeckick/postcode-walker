@@ -162,7 +162,7 @@ function _debugDrawGraph(graph, nodes, startLat, startLon) {
 
     // Use a FeatureGroup to add debug layers together for easier management/removal if needed
     const debugLayerGroup = L.featureGroup().addTo(map);
-    // We still add to drawnRouteLayers so clearRoutes() catches them
+    // Debug layers should NOT be added to drawnRouteLayers, only to their own group
 
     Object.keys(graph).forEach(nodeIdStr => {
         const nodeId = parseInt(nodeIdStr);
@@ -193,7 +193,6 @@ function _debugDrawGraph(graph, nodes, startLat, startLon) {
 
             const marker = L.circleMarker([nodeData.lat, nodeData.lon], markerOptions);
             marker.bindPopup(`Node: ${nodeId}`);
-            drawnRouteLayers.push(marker);
             debugLayerGroup.addLayer(marker); // Add to group
         }
 
@@ -210,8 +209,7 @@ function _debugDrawGraph(graph, nodes, startLat, startLon) {
                         color: '#00ffff', // Cyan edges
                         weight: 1,
                         opacity: 0.6
-                    });//.addTo(debugLayerGroup);
-                    drawnRouteLayers.push(polyline); 
+                    });
                     debugLayerGroup.addLayer(polyline); // Add to group
                     drawnEdges.add(edgeKey);
                  } else {
