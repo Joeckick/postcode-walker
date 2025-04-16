@@ -93,28 +93,20 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
     console.log(`Fetching OSM data around ${lat}, ${lon} for length ${desiredLengthMeters}m`);
     document.getElementById('results').innerHTML += '<p>Fetching walking paths data...</p>';
 
-    // Calculate search radius - desired length / 2 plus a buffer (e.g., 500m)
-    // Ensure radius is reasonable, e.g., at least 1000m
     const radius = Math.max(1000, (desiredLengthMeters / 2) + 500);
     console.log(`Using Overpass search radius: ${radius}m`);
 
-    // Overpass query to find walkable ways
-    // We look for common walkable highway types
     const query = `
         [out:json][timeout:30];
         (
           way
             ["highway"~"^(footway|path|pedestrian|track|residential|living_street|service|unclassified|tertiary)$"]
             (around:${radius},${lat},${lon});
-          // Optionally add ways explicitly tagged for foot traffic
-          // way["foot"="yes"](around:${radius},${lat},${lon});
         );
         out body;
         >;
         out skel qt;
     `;
-    // Note: "out skel qt;" is efficient for getting nodes and ways needed for geometry
-    // Using POST is recommended for larger queries
     const overpassUrl = 'https://overpass-api.de/api/interpreter';
 
     try {
@@ -133,11 +125,10 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
         const osmData = await response.json();
         console.log("Received OSM data:", osmData);
 
-        // Basic check if we got any elements
         if (osmData.elements && osmData.elements.length > 0) {
              document.getElementById('results').innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Next step: Process data and find routes.</p>`;
-             // --- TODO: Call function to process OSM data and build graph --- 
-             processOsmData(osmData);
+             // Pass lat, lon, and desiredLengthMeters
+             processOsmData(osmData, lat, lon, parseInt(desiredLengthMeters)); // Ensure length is number
         } else {
             document.getElementById('results').innerHTML += '<p>No walkable paths found in the immediate area via Overpass.</p>';
             alert("Could not find sufficient walking path data in this area. Try a different postcode or adjust length.");
@@ -150,7 +141,7 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
     }
 }
 
-function processOsmData(osmData) {
+function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
     console.log("Processing OSM data...");
     document.getElementById('results').innerHTML += '<p>Processing map data...</p>';
 
@@ -245,12 +236,7 @@ function processOsmData(osmData) {
     // --- Find the closest graph node to the start point --- 
     let startNodeId = null;
     let minDistance = Infinity;
-    // Get start coordinates from the map marker if available, otherwise need to pass them in
-    // For now, let's assume we passed lat/lon to this function (or retrieve from a global var)
-    // Needs refinement: Get lat/lon from the geocoding step reliably.
-    // We should pass the geocoded lat/lon into processOsmData.
-    const startLat = map.getCenter().lat; // Temporary way to get start lat/lon
-    const startLon = map.getCenter().lng;
+    // Use passed-in startLat, startLon
     const startPoint = turf.point([startLon, startLat]);
 
     Object.keys(graph).forEach(nodeId => {
@@ -268,6 +254,9 @@ function processOsmData(osmData) {
     if (startNodeId !== null) {
         console.log(`Starting node for routing (closest to postcode): ${startNodeId} (Distance: ${minDistance.toFixed(2)}m)`);
          document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Ready for route finding.</p>`;
+         document.getElementById('results').innerHTML += `<p>Starting route search...</p>`; // Added status update
+         // Call the routing algorithm
+         findWalkRoutes(graph, startNodeId, desiredLengthMeters); // Pass the graph, start node, and length
     } else {
         console.error("Could not find a suitable starting node in the graph.");
          document.getElementById('results').innerHTML += '<p>Error: Could not link postcode location to the path network.</p>';
@@ -281,5 +270,103 @@ function processOsmData(osmData) {
 
     // --- TODO: Implement routing algorithm (Step 9) --- 
     // findWalkRoutes(graph, startNodeId, desiredLengthMeters);
-    alert("Graph built, but route finding algorithm is not implemented yet.");
+    // alert("Graph built, but route finding algorithm is not implemented yet."); // REMOVED
+}
+
+// --- Step 9: Implement Routing Algorithm --- 
+const ROUTE_FINDING_TIMEOUT_MS = 15000; // 15 seconds max search time
+const LENGTH_TOLERANCE_PERCENT = 0.10; // +/- 10%
+const MAX_ROUTES_TO_FIND = 5;
+
+async function findWalkRoutes(graph, startNodeId, targetLength) {
+    console.log(`Starting route search from node ${startNodeId} for target length ${targetLength}m`);
+    const startTime = Date.now();
+    const foundRoutes = [];
+
+    const minLength = targetLength * (1 - LENGTH_TOLERANCE_PERCENT);
+    const maxLength = targetLength * (1 + LENGTH_TOLERANCE_PERCENT);
+    const absoluteMaxLength = targetLength * 1.5; // Prune paths significantly longer
+
+    // Stack for iterative DFS: [currentNodeId, pathArray, visitedEdgesSet, currentLength, geometryArray]
+    const stack = [];
+
+    // Initial state
+    stack.push([startNodeId, [startNodeId], new Set(), 0, []]);
+
+    let iterations = 0;
+
+    while (stack.length > 0) {
+        iterations++;
+        if (iterations % 1000 === 0) { 
+             const elapsedTime = Date.now() - startTime;
+             if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
+                 console.warn(`Route finding timed out after ${elapsedTime}ms`);
+                 document.getElementById('results').innerHTML += '<p>Route search timed out (complex area or length).</p>';
+                 break; 
+             }
+        }
+
+        const [currentNodeId, currentPath, visitedEdges, currentLength, currentGeometry] = stack.pop();
+
+        const neighbors = graph[currentNodeId] || [];
+        for (const edge of neighbors) {
+            const neighborId = edge.neighborId;
+            const edgeLength = edge.length;
+            const edgeGeometry = edge.geometry;
+            const newLength = currentLength + edgeLength;
+
+            // --- Pruning and Checks ---
+            if (newLength > absoluteMaxLength) continue;
+
+            if (currentPath.length > 1 && neighborId === currentPath[currentPath.length - 2]) continue; // Prevent immediate U-turn
+
+             if (neighborId === startNodeId && currentPath.length >= 2) { 
+                 if (newLength >= minLength && newLength <= maxLength) {
+                     const route = {
+                         length: newLength,
+                         path: [...currentPath, neighborId],
+                         geometry: [...currentGeometry, edgeGeometry]
+                     };
+                     foundRoutes.push(route);
+                     console.log(`Found route: Length ${newLength.toFixed(0)}m`);
+                     document.getElementById('results').innerHTML += `<p>Found potential route: ${newLength.toFixed(0)}m</p>`;
+
+                     if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
+                         stack.length = 0; 
+                         console.log(`Found maximum number of routes (${MAX_ROUTES_TO_FIND}).`);
+                         break;
+                     }
+                 }
+                 continue; 
+             }
+
+            // --- Prepare for next step ---
+            const newPath = [...currentPath, neighborId];
+            const newVisitedEdges = new Set(visitedEdges); 
+            const newGeometry = [...currentGeometry, edgeGeometry];
+
+            stack.push([neighborId, newPath, newVisitedEdges, newLength, newGeometry]);
+        }
+         if (foundRoutes.length >= MAX_ROUTES_TO_FIND) break; 
+    }
+
+    const endTime = Date.now();
+    console.log(`Route search finished in ${endTime - startTime}ms. Found ${foundRoutes.length} routes.`);
+
+    if (foundRoutes.length > 0) {
+        document.getElementById('results').innerHTML += `<h3>Found ${foundRoutes.length} route(s):</h3><ul>`; // Start list
+        foundRoutes.forEach((route, index) => {
+            console.log(`Route ${index + 1}: Length=${route.length.toFixed(0)}m, Nodes=${route.path.length}`);
+             document.getElementById('results').innerHTML += `<li>Route ${index + 1}: ${route.length.toFixed(0)}m</li>`;
+             // --- TODO: Draw route on map (Step 11) ---
+             // drawRoute(route); 
+        });
+         document.getElementById('results').innerHTML += `</ul>`; // End list
+    } else {
+         document.getElementById('results').innerHTML += `<p>No suitable loops found within the time limit and criteria.</p>`;
+         // Only alert if no routes found and no timeout message was already shown
+         if (Date.now() - startTime < ROUTE_FINDING_TIMEOUT_MS) {
+            alert("Could not find any walking loops matching your criteria. Try changing the length or postcode, or the area might be too complex.");
+         }
+    }
 } 
