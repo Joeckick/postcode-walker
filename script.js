@@ -409,7 +409,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
     const minLength = targetLength * (1 - LENGTH_TOLERANCE_PERCENT);
     const maxLength = targetLength * (1 + LENGTH_TOLERANCE_PERCENT);
     // We might relax the absolute max length slightly for A*
-    const absoluteMaxLength = targetLength * 1.75;
+    const absoluteMaxLength = targetLength * 10.0; // SIGNIFICANTLY INCREASED for debugging
 
     // Maximum allowed straight-line distance from the start point (as a fraction of target length)
     // This is a key pruning parameter - adjust if needed
@@ -474,6 +474,14 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         const current = openSet.shift(); 
         const currentNodeId = current.nodeId;
         const currentG = current.g;
+
+        // --- Debug Log: Check neighbors if current node is a neighbor of start ---
+        if (currentNodeId === 1178886671 || currentNodeId === 11405372363) { // Hardcoding IDs from previous log for NW1 4RY
+            console.log(`%cDEBUG: Processing node ${currentNodeId} (a direct neighbor of start node ${startNodeId})`, 'color: purple;');
+            console.log(`   Neighbors according to graph[${currentNodeId}]:`, graph[currentNodeId] || 'No neighbors listed!');
+        }
+        // --- End Debug Log ---
+
         // DEBUG: Log current node
         // if(iterations % 200 === 0) console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, openSet size: ${openSet.length}`);
         // More detailed log
@@ -549,7 +557,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
             // Pruning based on path length
             if (tentativeGScore > absoluteMaxLength) {
-                 console.log(`      Pruning neighbor ${neighborId}: Path too long (${tentativeGScore.toFixed(0)} > ${absoluteMaxLength.toFixed(0)})`);
+                 console.log(`%c      Pruning neighbor ${neighborId}: Path would exceed very large absolute max length (${tentativeGScore.toFixed(0)} > ${absoluteMaxLength.toFixed(0)})`, 'color: grey');
                  continue;
             }
 
