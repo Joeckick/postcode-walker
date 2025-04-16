@@ -344,8 +344,8 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
     });
 
     if (startNodeId !== null) {
-        console.log(`Found starting node: ${startNodeId}`);
-         document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}).</p>`;
+        console.log(`Found starting node: ${startNodeId}. Distance from postcode location: ${minDistance.toFixed(1)}m`); // Log the distance
+         document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Closest node is ${minDistance.toFixed(1)}m away.</p>`; // Add distance info
         
         // --- DEBUG: Visualize the graph --- 
         _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon
