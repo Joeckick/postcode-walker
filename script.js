@@ -350,7 +350,10 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
     // We might relax the absolute max length slightly for A*
     const absoluteMaxLength = targetLength * 1.75;
 
-    const MAX_DISTANCE_FACTOR = 0.75; 
+    // Maximum allowed straight-line distance from the start point (as a fraction of target length)
+    // This is a key pruning parameter - adjust if needed
+    // const MAX_DISTANCE_FACTOR = 0.75; // 75% of target length
+    const MAX_DISTANCE_FACTOR = 10.0; // Temporarily disable pruning by setting a very large factor
     const maxAllowedDistance = targetLength * MAX_DISTANCE_FACTOR;
     console.log(`Max allowed straight-line distance from start: ${maxAllowedDistance.toFixed(0)}m`);
 
