@@ -226,8 +226,8 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
     });
 
     const graphNodeCount = Object.keys(graph).length;
-    const graphEdgeCount = Object.values(graph).reduce((sum, edges) => sum + edges.length, 0) / 2; // Each edge counted twice
-    console.log(`Graph built: ${graphNodeCount} nodes (intersections/ends), ${graphEdgeCount} edges (segments).`);
+    const graphEdgeCount = Object.values(graph).reduce((sum, edges) => sum + edges.length, 0) / 2;
+    console.log(`Graph built: ${graphNodeCount} nodes, ${graphEdgeCount} edges.`); // Log after building
     document.getElementById('results').innerHTML += `<p>Network graph built (${graphNodeCount} nodes, ${graphEdgeCount} edges).</p>`;
 
     if (graphNodeCount === 0) {
@@ -239,7 +239,6 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
     // --- Find the closest graph node to the start point --- 
     let startNodeId = null;
     let minDistance = Infinity;
-    // Use passed-in startLat, startLon
     const startPoint = turf.point([startLon, startLat]);
 
     Object.keys(graph).forEach(nodeId => {
@@ -255,25 +254,27 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
     });
 
     if (startNodeId !== null) {
-        console.log(`Starting node for routing (closest to postcode): ${startNodeId} (Distance: ${minDistance.toFixed(2)}m)`);
-         document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Ready for route finding.</p>`;
-         document.getElementById('results').innerHTML += `<p>Starting route search...</p>`;
-         // Call the routing algorithm
-         findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon); // Pass the graph, start node, length, and start coordinates
+        console.log(`Found starting node: ${startNodeId}`);
+         document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}).</p>`;
+        
+        // --- DEBUG: Visualize the graph --- 
+        // _debugDrawGraph(graph, nodes); // Temporarily disable debug drawing to reduce noise
+
+        console.log("Attempting to call findWalkRoutes...");
+        try {
+             findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon);
+             console.log("findWalkRoutes call completed.");
+        } catch (error) {
+             console.error("Error occurred during findWalkRoutes call:", error);
+             document.getElementById('results').innerHTML += '<p>Error during route finding process.</p>';
+        }
+
     } else {
         console.error("Could not find a suitable starting node in the graph.");
          document.getElementById('results').innerHTML += '<p>Error: Could not link postcode location to the path network.</p>';
         alert("Could not find a starting point on the path network near the provided postcode.");
         return;
     }
-
-    // Store graph and start node for the routing algorithm
-    // e.g., window.walkGraph = graph; window.startNodeId = startNodeId;
-    // Or pass them to the next function.
-
-    // --- TODO: Implement routing algorithm (Step 9) --- 
-    // findWalkRoutes(graph, startNodeId, desiredLengthMeters);
-    // alert("Graph built, but route finding algorithm is not implemented yet."); // REMOVED
 }
 
 // --- Step 9: Implement Routing Algorithm --- 
@@ -529,5 +530,59 @@ function drawRoute(route, index) {
         }
     } else {
         console.warn(`Route ${index + 1} has insufficient coordinates to draw.`);
+    }
+}
+
+// Function to draw the constructed graph for debugging
+// ... (existing _debugDrawGraph code) ...
+
+// Main function to process OSM data, build graph, and initiate search
+function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
+    console.log("Processing OSM data...");
+    // ... (initial checks and data separation) ...
+
+    // Build edges between significant nodes
+    ways.forEach(way => {
+        // ... (segment building logic) ...
+    });
+
+    const graphNodeCount = Object.keys(graph).length;
+    const graphEdgeCount = Object.values(graph).reduce((sum, edges) => sum + edges.length, 0) / 2;
+    console.log(`Graph built: ${graphNodeCount} nodes, ${graphEdgeCount} edges.`); // Log after building
+    document.getElementById('results').innerHTML += `<p>Network graph built (${graphNodeCount} nodes, ${graphEdgeCount} edges).</p>`;
+
+    if (graphNodeCount === 0) {
+         // ... (handle empty graph) ...
+         return;
+    }
+
+    // --- Find the closest graph node to the start point --- 
+    let startNodeId = null;
+    let minDistance = Infinity;
+    const startPoint = turf.point([startLon, startLat]);
+    // ... (loop to find startNodeId) ...
+
+    if (startNodeId !== null) {
+        console.log(`Found starting node: ${startNodeId}`); // Log found start node
+         document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}).</p>`; // Simplified message
+        
+        // --- DEBUG: Visualize the graph --- 
+        // _debugDrawGraph(graph, nodes); // Temporarily disable debug drawing to reduce noise
+
+        console.log("Attempting to call findWalkRoutes..."); // Log before call
+        try {
+             // Call the routing algorithm
+             findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon);
+             console.log("findWalkRoutes call completed."); // Log after call
+        } catch (error) {
+             console.error("Error occurred during findWalkRoutes call:", error);
+             document.getElementById('results').innerHTML += '<p>Error during route finding process.</p>';
+        }
+
+    } else {
+        console.error("Could not find a suitable starting node in the graph.");
+        document.getElementById('results').innerHTML += '<p>Error: Could not link postcode location to the path network.</p>';
+        alert("Could not find a starting point on the path network near the provided postcode.");
+        return;
     }
 } 
