@@ -478,8 +478,9 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                 }
                 const neighborPoint = turf.point(neighborCoords);
                 
-                // Heuristic calculation
-                const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - tentativeGScore);
+                // Heuristic calculation (Simplified: only distance back to start)
+                // const h_complex = turf.distance(neighborPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - tentativeGScore);
+                const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}); // Simpler heuristic
                 const f = tentativeGScore + h;
                 // DEBUG: Log neighbor score
                 // console.log(`  -> Neighbor ${neighborId}: g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`);
