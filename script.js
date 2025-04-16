@@ -257,18 +257,15 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
     if (startNodeId !== null) {
         console.log(`Starting node for routing (closest to postcode): ${startNodeId} (Distance: ${minDistance.toFixed(2)}m)`);
          document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Ready for route finding.</p>`;
-         document.getElementById('results').innerHTML += `<p>Starting route search...</p>`; // Added status update
+         document.getElementById('results').innerHTML += `<p>Starting route search...</p>`;
          // Call the routing algorithm
-         findWalkRoutes(graph, startNodeId, desiredLengthMeters); // Pass the graph, start node, and length
+         findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon); // Pass the graph, start node, length, and start coordinates
     } else {
         console.error("Could not find a suitable starting node in the graph.");
          document.getElementById('results').innerHTML += '<p>Error: Could not link postcode location to the path network.</p>';
         alert("Could not find a starting point on the path network near the provided postcode.");
         return;
     }
-
-    // --- DEBUG: Visualize the graph --- 
-    _debugDrawGraph(graph, nodes);
 
     // Store graph and start node for the routing algorithm
     // e.g., window.walkGraph = graph; window.startNodeId = startNodeId;
@@ -284,7 +281,7 @@ const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds max search time (Increased
 const LENGTH_TOLERANCE_PERCENT = 0.10; // +/- 10%
 const MAX_ROUTES_TO_FIND = 5;
 
-async function findWalkRoutes(graph, startNodeId, targetLength) {
+async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startLon) {
     console.log(`Starting route search from node ${startNodeId} for target length ${targetLength}m`);
     const startTime = Date.now();
     const foundRoutes = [];
@@ -293,6 +290,15 @@ async function findWalkRoutes(graph, startNodeId, targetLength) {
     const maxLength = targetLength * (1 + LENGTH_TOLERANCE_PERCENT);
     const absoluteMaxLength = targetLength * 1.5; // Prune paths significantly longer
 
+    // Maximum allowed straight-line distance from the start point (as a fraction of target length)
+    // This is a key pruning parameter - adjust if needed
+    const MAX_DISTANCE_FACTOR = 0.75; // 75% of target length
+    const maxAllowedDistance = targetLength * MAX_DISTANCE_FACTOR;
+    console.log(`Max allowed straight-line distance from start: ${maxAllowedDistance.toFixed(0)}m`);
+
+    // Create a turf point for the start location (used for distance calculations)
+    const startPoint = turf.point([startLon, startLat]);
+
     // Stack for iterative DFS: [currentNodeId, pathArray, visitedEdgesSet, currentLength, geometryArray]
     const stack = [];
 
@@ -300,6 +306,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength) {
     stack.push([startNodeId, [startNodeId], new Set(), 0, []]);
 
     let iterations = 0;
+    let prunedNodesCount = 0; // Keep track of nodes pruned due to distance
 
     // Clear previous routes from map and list before starting search
     clearRoutes();
@@ -308,15 +315,35 @@ async function findWalkRoutes(graph, startNodeId, targetLength) {
     while (stack.length > 0) {
         iterations++;
         if (iterations % 1000 === 0) { 
-             const elapsedTime = Date.now() - startTime;
-             if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
-                 console.warn(`Route finding timed out after ${elapsedTime}ms`);
-                 document.getElementById('results').innerHTML += '<p>Route search timed out (complex area or length).</p>';
-                 break; 
-             }
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
+                console.warn(`Route finding timed out after ${elapsedTime}ms`);
+                document.getElementById('results').innerHTML += '<p>Route search timed out (complex area or length).</p>';
+                break; 
+            }
         }
 
         const [currentNodeId, currentPath, visitedEdges, currentLength, currentGeometry] = stack.pop();
+
+        // --- Distance-based pruning: Check if current node is too far from the start ---
+        const nodeData = graph[currentNodeId];
+        if (nodeData && nodeData.length > 0 && nodeData[0].geometry) {
+            // Get the coordinates of the current node (first point of the first edge's geometry)
+            const coords = nodeData[0].geometry[0];
+            if (coords && coords.length >= 2) {
+                const currentPoint = turf.point([coords[0], coords[1]]);
+                const distanceToStart = turf.distance(startPoint, currentPoint, { units: 'meters' });
+                
+                // If the node is too far from the start in a straight line, don't explore it further
+                if (distanceToStart > maxAllowedDistance) {
+                    prunedNodesCount++;
+                    if (prunedNodesCount % 100 === 0) {
+                        console.log(`Pruned ${prunedNodesCount} nodes due to distance threshold.`);
+                    }
+                    continue; // Skip to the next node in the stack
+                }
+            }
+        }
 
         const neighbors = graph[currentNodeId] || [];
         for (const edge of neighbors) {
@@ -433,51 +460,4 @@ function drawRoute(route, index) {
     } else {
         console.warn(`Route ${index + 1} has insufficient coordinates to draw.`);
     }
-}
-
-// Function to draw the constructed graph for debugging
-function _debugDrawGraph(graph, nodes) {
-    console.log("Debugging: Drawing graph nodes and edges...");
-    const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
-
-    Object.keys(graph).forEach(nodeIdStr => {
-        const nodeId = parseInt(nodeIdStr);
-        const nodeData = nodes[nodeId];
-
-        // Draw node marker
-        if (nodeData) {
-            const marker = L.circleMarker([nodeData.lat, nodeData.lon], {
-                radius: 3,
-                color: '#ff00ff', // Magenta nodes
-                fillOpacity: 0.8
-            }).addTo(map);
-             marker.bindPopup(`Node: ${nodeId}`);
-             drawnRouteLayers.push(marker); // Add marker to layers to be cleared
-        }
-
-        // Draw edges originating from this node
-        const edges = graph[nodeId] || [];
-        edges.forEach(edge => {
-            const neighborId = edge.neighborId;
-
-            // Create a unique key for the edge pair to avoid double drawing
-            const edgeKey = [nodeId, neighborId].sort((a, b) => a - b).join('-');
-
-            if (!drawnEdges.has(edgeKey)) {
-                 if (edge.geometry && edge.geometry.length >= 2) {
-                    const leafletCoords = edge.geometry.map(coord => [coord[1], coord[0]]); // lon,lat -> lat,lon
-                    const polyline = L.polyline(leafletCoords, {
-                        color: '#00ffff', // Cyan edges
-                        weight: 1,
-                        opacity: 0.6
-                    }).addTo(map);
-                    drawnRouteLayers.push(polyline); // Add edge to layers to be cleared
-                    drawnEdges.add(edgeKey);
-                 } else {
-                     console.warn(`Edge ${edgeKey} has invalid geometry:`, edge.geometry);
-                 }
-            }
-        });
-    });
-     console.log(`Debugging: Drawn ${drawnEdges.size} unique graph edges.`);
 } 
