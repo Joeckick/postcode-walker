@@ -49,7 +49,9 @@ document.addEventListener('DOMContentLoaded', () => {
 async function findRoutes() {
     console.log("Find routes button clicked!");
     const startPostcode = document.getElementById('postcode').value.trim();
-    const endPostcode = document.getElementById('end_postcode_input').value.trim(); // Get end postcode using correct ID
+    const endPostcodeElement = document.getElementById('end_postcode_input');
+    console.log("DEBUG: Element with ID 'end_postcode_input':", endPostcodeElement);
+    const endPostcode = endPostcodeElement.value.trim(); // Get end postcode using correct ID
     // const desiredLengthMeters = parseInt(lengthInput); // Removed length input
 
     console.log(`Searching for route from ${startPostcode} to ${endPostcode}`);
