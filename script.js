@@ -583,7 +583,8 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
         // --- Explore Neighbors --- 
         const neighbors = graph[currentNodeId] || [];
-        console.log(` -> Exploring ${neighbors.length} neighbors of ${currentNodeId}`); // Log neighbor count
+        // console.log(` -> Exploring ${neighbors.length} neighbors of ${currentNodeId}`); // Keep commented for now
+        console.log(`%c   BEGIN Exploring ${neighbors.length} neighbors of ${currentNodeId}...`, 'color: blue'); // New log
 
         for (const edge of neighbors) {
             const neighborId = edge.neighborId;
@@ -656,6 +657,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                  console.log(`      Skipping neighbor ${neighborId}: Worse path found (Existing g=${existingGScore.toFixed(0)}, New g=${tentativeGScore.toFixed(0)})`); // Log skipping due to gScore
              }
         }
+        console.log(`%c   END Exploring neighbors of ${currentNodeId}.`, 'color: blue'); // New log
     }
 
     // --- Log reason for loop termination ---
