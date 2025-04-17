@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function findRoutes() {
     console.log("Find routes button clicked!");
     const startPostcode = document.getElementById('postcode').value.trim();
-    const endPostcode = document.getElementById('end_postcode').value.trim(); // Get end postcode
+    const endPostcode = document.getElementById('end_postcode_input').value.trim(); // Get end postcode using correct ID
     // const desiredLengthMeters = parseInt(lengthInput); // Removed length input
 
     console.log(`Searching for route from ${startPostcode} to ${endPostcode}`);
@@ -422,7 +422,8 @@ function processOsmData(osmData, startLat, startLon, endLat, endLon) {
     console.log("Attempting to call findWalkRoutes...");
     try {
         // Pass startNodeId, endNodeId, and actual coordinates of endNode for heuristic
-        findWalkRoutes(graph, startNodeId, endNodeId, endNodeActualCoords.lat, endNodeActualCoords.lon);
+        // *** Also pass the nodes object for heuristic calculations inside A* ***
+        findWalkRoutes(graph, nodes, startNodeId, endNodeId, endNodeActualCoords.lat, endNodeActualCoords.lon);
         console.log("findWalkRoutes call apparently completed.");
     } catch (error) {
         console.error("Error occurred *during* findWalkRoutes call (full error):", error);
@@ -448,13 +449,13 @@ function findSortedIndex(array, element) {
 }
 
 // A* Search Implementation for Point-to-Point
-async function findWalkRoutes(graph, startNodeId, endNodeId, endLat, endLon) {
+async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endLon) { // Added nodes parameter
     console.log(`Starting A* route search from node ${startNodeId} to node ${endNodeId}`);
     // Removed targetLength, startLat, startLon from params/logs
-    console.log(`Received graph nodes: ${Object.keys(graph).length}, startNodeId: ${startNodeId}, endNodeId: ${endNodeId}`); 
+    console.log(`Received graph nodes: ${Object.keys(graph).length}, node data entries: ${Object.keys(nodes).length}, startNodeId: ${startNodeId}, endNodeId: ${endNodeId}`); // Log nodes count
     
     // Updated parameter check
-    if (!graph || Object.keys(graph).length === 0 || !startNodeId || !endNodeId || !endLat || !endLon) {
+    if (!graph || Object.keys(graph).length === 0 || !nodes || Object.keys(nodes).length === 0 || !startNodeId || !endNodeId || !endLat || !endLon) { // Check nodes
         console.error("findWalkRoutes called with invalid parameters!");
         return;
     }
