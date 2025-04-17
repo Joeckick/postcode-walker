@@ -554,6 +554,110 @@ function processOsmData(osmData, startLat, startLon) {
    // console.log("processOsmData finished execution.");
 }
 
+// --- Step 6b: Find Walk Near Distance (DFS) ---
+async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
+    console.log(`Searching for walk near ${targetDistance}m starting from node ${startNodeId}`);
+    const startTime = Date.now();
+    let bestRoute = null;
+    let minDiff = Infinity; // Minimum difference found so far
+
+    // Use a stack for DFS: stores { nodeId, path, segments, currentLength }
+    const stack = []; 
+    
+    // Initial state
+    if (graph[startNodeId]) {
+        stack.push({ 
+            nodeId: startNodeId, 
+            path: [startNodeId], 
+            segments: [], 
+            currentLength: 0, 
+            visited: new Set([startNodeId]) // Keep track of visited nodes *in the current path*
+        });
+    } else {
+        console.error(`Start node ${startNodeId} not found in graph for DFS.`);
+        return null; // Cannot start search
+    }
+
+    let iterations = 0;
+    const tolerance = targetDistance * 0.2; // Allow +/- 20% deviation? (Adjustable)
+    const lowerBound = targetDistance - tolerance;
+    const upperBound = targetDistance + tolerance;
+
+    while (stack.length > 0) {
+        iterations++;
+        if (iterations % 5000 === 0) { // Timeout check
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
+                console.warn(`findWalkNearDistance DFS timed out after ${elapsedTime}ms`);
+                break; // Stop searching
+            }
+             console.log(`DFS iteration ${iterations}, stack size ${stack.length}`);
+        }
+
+        const { nodeId, path, segments, currentLength, visited } = stack.pop();
+
+        // Check if current path is a candidate
+        const diff = Math.abs(currentLength - targetDistance);
+        if (currentLength >= lowerBound && currentLength <= upperBound) {
+            // Found a path within tolerance
+            if (diff < minDiff) {
+                 console.log(`Found candidate route: Length ${currentLength.toFixed(0)}m (Diff: ${diff.toFixed(0)}m)`);
+                minDiff = diff;
+                bestRoute = { length: currentLength, path: path, segments: segments };
+                // Could potentially stop here if we only need the first acceptable route
+                // Or continue searching for one closer to the target distance
+            }
+        }
+        
+        // If current path is already much longer than target, prune this branch
+        // (Add a more generous upper bound for pruning to allow finding routes slightly over)
+        if (currentLength > targetDistance * 1.5) { // e.g. Prune if > 150% of target
+            continue; 
+        }
+
+        // Explore neighbors
+        const neighbors = graph[nodeId] || [];
+        // Shuffle neighbors to explore different directions randomly? (Optional)
+        // neighbors.sort(() => Math.random() - 0.5); 
+
+        for (const edge of neighbors) {
+            const neighborId = edge.neighborId;
+
+            // Avoid cycles in the current path
+            if (!visited.has(neighborId)) {
+                const newLength = currentLength + edge.length;
+                const newPath = [...path, neighborId];
+                const newSegment = { 
+                    geometry: edge.geometry, 
+                    length: edge.length, 
+                    wayId: edge.wayId, 
+                    wayName: edge.wayName 
+                };
+                const newSegments = [...segments, newSegment];
+                const newVisited = new Set(visited); // Create a new visited set for the new path
+                newVisited.add(neighborId);
+
+                stack.push({
+                    nodeId: neighborId,
+                    path: newPath,
+                    segments: newSegments,
+                    currentLength: newLength,
+                    visited: newVisited
+                });
+            }
+        }
+    } // End while loop
+
+    const endTime = Date.now();
+    if (bestRoute) {
+        console.log(`DFS finished in ${endTime - startTime}ms. Best route found: Length ${bestRoute.length.toFixed(0)}m (Target: ${targetDistance}m)`);
+    } else {
+         console.log(`DFS finished in ${endTime - startTime}ms. No suitable route found near ${targetDistance}m.`);
+    }
+    
+    return bestRoute;
+}
+
 // --- Step 6: Routing Algorithm ---
 // Note: findSortedIndex is a helper for findWalkRoutes
 function findSortedIndex(array, element) {
