@@ -186,19 +186,65 @@ async function findRoutes() {
 
             if (outwardRoute && outwardRoute.segments && outwardRoute.segments.length > 0) {
                 console.log(`Found outward path: Length=${outwardRoute.length.toFixed(0)}m`);
-                resultsDiv.innerHTML += `<h3>Found Outward Path:</h3><ul>`;
-                resultsDiv.innerHTML += `<li>Approx. Length: ${(outwardRoute.length / 1000).toFixed(1)} km (${outwardRoute.length.toFixed(0)}m)</li>`;
+                // Display outward path temporarily or keep it? Let's clear it before drawing combined.
+                // drawRoute(outwardRoute, 1); 
+                // resultsDiv.innerHTML += `<h3>Found Outward Path...</h3>`;
                 
-                // Draw outward path (index 1 = blue)
-                drawRoute(outwardRoute, 1); 
-                 resultsDiv.innerHTML += `</ul>`;
+                // --- Find Return Path using A* --- 
+                resultsDiv.innerHTML += `<p>Searching for return path...</p>`;
+                const midpointNodeId = outwardRoute.path[outwardRoute.path.length - 1];
+                console.log(`Finding return path from midpoint node ${midpointNodeId} to start node ${startNodeId}`);
                 
-                resultsDiv.innerHTML += `<p>STEP 3 TEST: Found outward path. Return path finding not yet implemented.</p>`;
-                 // TODO: Implement Step 4 - find return path using A*
-                 return; // Stop here for Step 3 testing
+                const returnRoute = await findShortestPathAStar(graph, nodes, midpointNodeId, startNodeId);
+
+                if (returnRoute && returnRoute.segments && returnRoute.segments.length > 0) {
+                    console.log(`Found return path: Length=${returnRoute.length.toFixed(0)}m`);
+                    
+                    // Combine Routes
+                    const totalLength = outwardRoute.length + returnRoute.length;
+                    const combinedSegments = outwardRoute.segments.concat(returnRoute.segments);
+                    // Combine paths for potential future use, though not strictly needed for drawing/instructions
+                    const combinedPath = outwardRoute.path.concat(returnRoute.path.slice(1)); // Avoid duplicating midpoint
+                    const combinedRoute = { length: totalLength, segments: combinedSegments, path: combinedPath };
+
+                    console.log(`Combined round trip: Length=${totalLength.toFixed(0)}m, Segments=${combinedSegments.length}`);
+                    resultsDiv.innerHTML += `<h3>Round Trip Found:</h3><ul>`;
+                    resultsDiv.innerHTML += `<li>Total Approx. Length: ${(totalLength / 1000).toFixed(1)} km (${totalLength.toFixed(0)}m)</li>`;
+                    
+                    // Clear previous single path drawing before drawing combined
+                    clearRoutes(); 
+                    L.marker([startCoords.latitude, startCoords.longitude]).addTo(map)
+                        .bindPopup(`Start/End: ${startCoords.postcode}`)
+                        .openPopup(); // Re-add start marker if cleared
+
+                    drawRoute(combinedRoute, 0); // Draw combined route in red
+                    resultsDiv.innerHTML += `</ul>`;
+                    
+                    const instructionsHtml = generateInstructions(combinedSegments);
+                    document.getElementById('results').innerHTML += instructionsHtml;
+                    
+                    // Fit map
+                    try {
+                         const routeLine = L.polyline(combinedRoute.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
+                         if (routeLine.getLatLngs().length > 0) {
+                              map.fitBounds(routeLine.getBounds().pad(0.1)); 
+                         }
+                     } catch (e) {
+                         console.error("Error fitting map bounds to combined route:", e);
+                     }
+
+                } else {
+                    // Found outward, but no return path
+                    resultsDiv.innerHTML = `<p>Found an outward path of approx. ${(outwardRoute.length/1000).toFixed(1)} km, but could not find a path back to the start.</p>`;
+                    alert("Could not find a return path back to the start point.");
+                    // Keep the outward path drawn in this case
+                    drawRoute(outwardRoute, 1); 
+                }
+                // --- End Return Path Logic ---
 
             } else {
-                resultsDiv.innerHTML = `<p>Could not find a suitable outward path near ${(outwardTargetDistance / 1000).toFixed(1)} km.</p>`; // Use =
+                // No outward path found
+                resultsDiv.innerHTML = `<p>Could not find a suitable outward path near ${(outwardTargetDistance / 1000).toFixed(1)} km.</p>`; 
                 alert(`Could not find an outward path. Try a different distance or start point.`);
             }
         
@@ -699,6 +745,131 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
         document.getElementById('results').innerHTML += `<p>Could not find a route between the start and end points.</p>`;
         alert("Could not find a route. The points may not be connected on the path network, or the search timed out.");
     }
+}
+
+// --- Step 6c: A* Implementation for Point-to-Point Routing ---
+
+async function findShortestPathAStar(graph, nodes, startNodeId, endNodeId) {
+    console.log(`Starting A* shortest path search from node ${startNodeId} to node ${endNodeId}`);
+    const startTime = Date.now();
+
+    // Basic parameter check
+    if (!graph || !nodes || !startNodeId || !endNodeId || !graph[startNodeId] ) {
+        console.error("findShortestPathAStar called with invalid parameters!", 
+            { graphExists: !!graph, nodesExists: !!nodes, startNodeId, endNodeId, startInGraph: !!graph?.[startNodeId] });
+        return null;
+    }
+    // Check if end node actually exists in the graph nodes data (heuristic needs it)
+    if (!nodes[endNodeId]) {
+        console.error(`End node ${endNodeId} data not found in nodes object.`);
+        // We could technically proceed without heuristic, but it's usually required
+        return null; 
+    }
+
+    const openSet = []; // Priority Queue (using sorted array)
+    const cameFrom = {}; // Stores { fromNode, segment } 
+    const gScore = {}; // Cost from start to node
+
+    // Initialize scores
+    Object.keys(graph).forEach(nodeId => {
+        gScore[parseInt(nodeId)] = Infinity;
+    });
+    gScore[startNodeId] = 0;
+
+    // Heuristic function (straight-line distance to end)
+    const endNodeData = nodes[endNodeId];
+    const endPoint = turf.point([endNodeData.lon, endNodeData.lat]);
+    const heuristic = (nodeId) => {
+        const nodeData = nodes[nodeId];
+        if (!nodeData) return Infinity; // Should not happen if graph is consistent
+        const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
+        return turf.distance(nodePoint, endPoint, { units: 'meters' });
+    };
+
+    // Add start node to PQ
+    openSet.push({ nodeId: startNodeId, f: heuristic(startNodeId) });
+
+    let iterations = 0;
+
+    while (openSet.length > 0) {
+        iterations++;
+        // Simple timeout check
+        if (iterations % 2000 === 0) {
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) { // Use standard timeout
+                console.warn(`A* shortest path search timed out after ${elapsedTime}ms`);
+                return null; // Indicate timeout/failure
+            }
+        }
+
+        // Get node with lowest f score 
+        const current = openSet.shift();
+        const u = current.nodeId;
+
+        // --- Goal Check ---
+        if (u === endNodeId) {
+            console.log(`A* found path to ${endNodeId} in ${iterations} iterations.`);
+            // Reconstruct path
+            const segments = [];
+            const pathNodes = [];
+            let curr = endNodeId;
+            while (cameFrom[curr]) {
+                pathNodes.push(curr);
+                const predInfo = cameFrom[curr];
+                segments.push(predInfo.segment); // Store the segment used to reach curr
+                curr = predInfo.fromNode;
+            }
+            pathNodes.push(startNodeId); 
+            segments.reverse(); 
+            pathNodes.reverse();
+            console.log(`Reconstructed A* path: ${segments.length} segments, ${pathNodes.length} nodes.`);
+            return { length: gScore[endNodeId], segments: segments, path: pathNodes };
+        }
+
+        // --- Explore Neighbors ---
+        const neighbors = graph[u] || [];
+        for (const edge of neighbors) {
+            const v = edge.neighborId;
+            const tentativeGScore = gScore[u] + edge.length;
+
+            if (tentativeGScore < gScore[v]) {
+                // This path to neighbor is better than any previous one. Record it!
+                cameFrom[v] = { 
+                    fromNode: u, 
+                    segment: { // Store details needed for reconstruction
+                        geometry: edge.geometry, 
+                        length: edge.length, 
+                        wayId: edge.wayId, 
+                        wayName: edge.wayName 
+                    } 
+                };
+                gScore[v] = tentativeGScore;
+                const fScore = tentativeGScore + heuristic(v);
+                
+                // Add neighbor to priority queue (if not already present with lower f)
+                // Simple check: does it exist in openSet already?
+                const existingIndex = openSet.findIndex(item => item.nodeId === v);
+                if (existingIndex === -1) {
+                    const newState = { nodeId: v, f: fScore };
+                    const index = findSortedIndex(openSet, newState); // Use helper
+                    openSet.splice(index, 0, newState);
+                } else {
+                    // If it exists but this path is better (lower f), update it
+                    // (More complex PQ needed for efficient update, this is approximation)
+                    if (fScore < openSet[existingIndex].f) {
+                        openSet.splice(existingIndex, 1); // Remove old one
+                        const newState = { nodeId: v, f: fScore };
+                        const index = findSortedIndex(openSet, newState);
+                        openSet.splice(index, 0, newState); // Add new one
+                    }
+                }
+            }
+        }
+    }
+
+    // Open set is empty but goal was never reached
+    console.log(`A* failed to find a path from ${startNodeId} to ${endNodeId} after ${iterations} iterations.`);
+    return null;
 }
 
 // --- Step 8: Instruction Generation ---
