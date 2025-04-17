@@ -631,8 +631,19 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         }
     }
 
+    // --- Log reason for loop termination ---
     const endTime = Date.now();
-    console.log(`A* Route search finished in ${endTime - startTime}ms. Found ${foundRoutes.length} routes.`);
+    let terminationReason = "Unknown";
+    if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
+        terminationReason = "Found maximum routes";
+    } else if (Date.now() - startTime >= ROUTE_FINDING_TIMEOUT_MS) {
+        terminationReason = "Timeout reached";
+    } else if (openSet.length === 0) {
+        terminationReason = "OpenSet became empty";
+    }
+    console.log(`A* Route search finished in ${endTime - startTime}ms. Reason: ${terminationReason}. Found ${foundRoutes.length} routes.`);
+    // --- End Log ---
+
     if (foundRoutes.length > 0) {
         document.getElementById('results').innerHTML += `<h3>Found ${foundRoutes.length} route(s) using A*:</h3><ul>`;
         foundRoutes.forEach((route, index) => {
