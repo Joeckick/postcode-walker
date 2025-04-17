@@ -497,12 +497,12 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
     while (openSet.length > 0) {
         iterations++;
-        // console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Simple log
-        // console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Log simplified openSet state
+        console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Simple log
+        console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Log simplified openSet state
 
         // Get node with the lowest f score (from the start of the sorted array)
         const current = openSet.shift(); 
-        // console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Log shifted node
+        console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Log shifted node
 
         const currentNodeId = current.nodeId;
         const currentG = current.g;
