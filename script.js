@@ -2,10 +2,10 @@
 const POSTCODES_IO_API_URL = 'https://api.postcodes.io/postcodes/';
 const OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter';
 const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds
-const LENGTH_TOLERANCE_PERCENT = 0.40; // +/- 40% (Increased from 20%)
-const MAX_ROUTES_TO_FIND = 5;
-const ABSOLUTE_MAX_LENGTH_FACTOR = 3.0; // Factor for pruning paths much longer than target (Reduced from 10)
-const MAX_DISTANCE_FACTOR = 10.0; // Factor for distance-based pruning (currently high)
+// const LENGTH_TOLERANCE_PERCENT = 0.40; // +/- 40% (Removed - not needed for point-to-point)
+const MAX_ROUTES_TO_FIND = 1; // Find only the shortest
+// const ABSOLUTE_MAX_LENGTH_FACTOR = 3.0; // Factor for pruning paths much longer than target (Removed - no length pruning)
+// const MAX_DISTANCE_FACTOR = 10.0; // Factor for distance-based pruning (Removed - no distance pruning)
 const NEAR_START_THRESHOLD_METERS = 50; // For debug graph visualization
 
 console.log("Script loaded.");
@@ -48,22 +48,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function findRoutes() {
     console.log("Find routes button clicked!");
-    const postcode = document.getElementById('postcode').value.trim();
-    const lengthInput = document.getElementById('length').value;
-    const desiredLengthMeters = parseInt(lengthInput);
+    const startPostcode = document.getElementById('postcode').value.trim();
+    const endPostcode = document.getElementById('end_postcode').value.trim(); // Get end postcode
+    // const desiredLengthMeters = parseInt(lengthInput); // Removed length input
 
-    console.log(`Searching for routes near ${postcode} of length ${desiredLengthMeters}m`);
+    console.log(`Searching for route from ${startPostcode} to ${endPostcode}`);
     const resultsDiv = document.getElementById('results');
     resultsDiv.innerHTML = ''; // Clear previous results
 
-    if (!postcode) {
-        alert("Please enter a UK postcode.");
+    if (!startPostcode || !endPostcode) { // Check both postcodes
+        alert("Please enter both a start and end UK postcode.");
         return;
     }
-    if (isNaN(desiredLengthMeters) || desiredLengthMeters <= 0) {
-        alert("Please enter a valid desired walk length in meters.");
-        return;
-    }
+    // Removed length validation
 
     if (!map) {
         console.error("Map is not initialized yet.");
@@ -71,18 +68,27 @@ async function findRoutes() {
         return;
     }
 
-    resultsDiv.innerHTML = '<p>Looking up postcode...</p>';
-    let coords;
+    resultsDiv.innerHTML = '<p>Looking up postcodes...</p>';
+    let startCoords, endCoords;
     try {
-        coords = await lookupPostcodeCoords(postcode);
-        console.log(`Coordinates found: Lat: ${coords.latitude}, Lon: ${coords.longitude}`);
-        resultsDiv.innerHTML = `<p>Found location for ${coords.postcode}. Fetching map data...</p>`;
+        // Lookup both postcodes
+        startCoords = await lookupPostcodeCoords(startPostcode);
+        endCoords = await lookupPostcodeCoords(endPostcode);
+        console.log(`Start Coords: Lat: ${startCoords.latitude}, Lon: ${startCoords.longitude}`);
+        console.log(`End Coords: Lat: ${endCoords.latitude}, Lon: ${endCoords.longitude}`);
+        resultsDiv.innerHTML = `<p>Found locations for ${startCoords.postcode} and ${endCoords.postcode}. Fetching map data...</p>`;
 
-        // Center map and add marker
-        map.setView([coords.latitude, coords.longitude], 15);
-        L.marker([coords.latitude, coords.longitude]).addTo(map)
-            .bindPopup(`Start: ${coords.postcode}`)
+        // Clear previous map markers/routes if necessary (clearRoutes might need adjustment)
+        clearRoutes(); 
+
+        // Center map roughly between start and end? Or just on start?
+        // Let's fit bounds later after finding the route.
+        map.setView([startCoords.latitude, startCoords.longitude], 13); // Adjust zoom?
+        L.marker([startCoords.latitude, startCoords.longitude]).addTo(map)
+            .bindPopup(`Start: ${startCoords.postcode}`)
             .openPopup();
+        L.marker([endCoords.latitude, endCoords.longitude]).addTo(map)
+            .bindPopup(`End: ${endCoords.postcode}`);
 
     } catch (error) {
         console.error(error);
@@ -91,8 +97,13 @@ async function findRoutes() {
         return;
     }
 
+    // Fetch OSM Data - Use a bounding box or just radius around start? 
+    // For now, keep radius around start, but make it larger or dependent on distance?
+    // Let's use a fixed large radius for simplicity first.
+    const fetchRadius = 5000; // Increased fixed radius (e.g., 5km) for point-to-point
     try {
-        const osmData = await fetchOsmDataNear(coords.latitude, coords.longitude, desiredLengthMeters);
+        // Pass start coords for fetching, but end coords for processing
+        const osmData = await fetchOsmDataNear(startCoords.latitude, startCoords.longitude, fetchRadius); 
         if (osmData.elements.length === 0) {
              resultsDiv.innerHTML += '<p>No map features (paths, roads) found in the Overpass response for this area.</p>';
              alert("Map data received, but it contained no usable paths for this specific area.");
@@ -100,8 +111,8 @@ async function findRoutes() {
         }
         resultsDiv.innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Processing data...</p>`;
 
-        // Start the processing and routing
-        processOsmData(osmData, coords.latitude, coords.longitude, desiredLengthMeters);
+        // Start the processing and routing - pass end coords
+        processOsmData(osmData, startCoords.latitude, startCoords.longitude, endCoords.latitude, endCoords.longitude);
 
     } catch (error) {
          console.error(error);
@@ -307,9 +318,9 @@ function buildGraph(nodes, ways) {
 }
 
 // Parses raw OSM data and finds the graph node nearest to the start coordinates.
-function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
+function processOsmData(osmData, startLat, startLon, endLat, endLon) {
     console.log("Processing OSM data...");
-    const resultsDiv = document.getElementById('results'); // Get results div again or pass it?
+    const resultsDiv = document.getElementById('results');
 
     if (typeof turf === 'undefined') {
         console.error("Turf.js library not found!");
@@ -319,8 +330,8 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
     }
 
     // --- 1. Parse OSM Data --- 
-    const nodes = {};     // Store node coords { id: { lat: ..., lon: ... } }
-    const ways = [];      // Store way objects { id: ..., nodes: [...] }
+    const nodes = {};
+    const ways = [];
     osmData.elements.forEach(element => {
         if (element.type === 'node') {
             nodes[element.id] = { lat: element.lat, lon: element.lon };
@@ -351,70 +362,74 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
          alert("Failed to build a searchable path network for this area.");
          return;
     }
-    // Moved node/edge count log into buildGraph
     resultsDiv.innerHTML += `<p>Network graph built (${graphNodeCount} nodes).</p>`;
 
-    // --- 3. Find Closest Start Node --- 
+    // --- 3. Find Closest Start and End Nodes --- 
     let startNodeId = null;
-    let minDistance = Infinity;
+    let endNodeId = null;
+    let minStartDistance = Infinity;
+    let minEndDistance = Infinity;
+    let startNodeActualCoords = null;
+    let endNodeActualCoords = null; // Store actual coords of the found nodes
+
     try {
         const startPoint = turf.point([startLon, startLat]);
-        Object.keys(graph).forEach(nodeId => { // Only check nodes actually in the graph
-            const nodeData = nodes[nodeId]; // Get coords from original nodes object
+        const endPoint = turf.point([endLon, endLat]);
+
+        Object.keys(graph).forEach(nodeId => {
+            const nodeData = nodes[nodeId];
             if (nodeData) {
                 const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
-                const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
-                if (distance < minDistance) {
-                    minDistance = distance;
+                // Check distance to start
+                const distToStart = turf.distance(startPoint, nodePoint, { units: 'meters' });
+                if (distToStart < minStartDistance) {
+                    minStartDistance = distToStart;
                     startNodeId = parseInt(nodeId);
+                    startNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
+                }
+                // Check distance to end
+                const distToEnd = turf.distance(endPoint, nodePoint, { units: 'meters' });
+                if (distToEnd < minEndDistance) {
+                    minEndDistance = distToEnd;
+                    endNodeId = parseInt(nodeId);
+                    endNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
                 }
             }
         });
     } catch (error) {
-         console.error("Error finding closest start node:", error);
+         console.error("Error finding closest start/end nodes:", error);
          alert(`Error linking postcode to path network: ${error.message}`);
          resultsDiv.innerHTML += '<p>Error linking postcode to path network.</p>';
          return;
     }
 
-    if (startNodeId !== null) {
-        console.log(`Found starting node: ${startNodeId}. Distance from postcode location: ${minDistance.toFixed(1)}m`);
-        resultsDiv.innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Closest node is ${minDistance.toFixed(1)}m away.</p>`;
-        
-        // --- DEBUG: Visualize the graph --- 
-        _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon
-
-        // --- Log Start Node Neighbors ---
-        const startNodeCoordsLog = nodes[startNodeId] ? `(${nodes[startNodeId].lat.toFixed(5)}, ${nodes[startNodeId].lon.toFixed(5)})` : '(Coords not found)';
-        console.log(`%cDEBUG: Start Node ${startNodeId} ${startNodeCoordsLog}`, 'background: #eee; color: black;');
-        const neighborsOfStart = graph[startNodeId] || [];
-        if (neighborsOfStart.length > 0) {
-            neighborsOfStart.forEach(edge => {
-                const neighborCoordsLog = nodes[edge.neighborId] ? `(${nodes[edge.neighborId].lat.toFixed(5)}, ${nodes[edge.neighborId].lon.toFixed(5)})` : '(Coords not found)';
-                console.log(`  -> Neighbor: ${edge.neighborId} ${neighborCoordsLog} (Length: ${edge.length.toFixed(1)}m)`);
-            });
-        } else {
-             console.log('  -> No neighbors found in graph object!');
-        }
-        // console.log(graph[startNodeId] || 'No neighbors found in graph object!'); // Old log
-        // --- End Log ---
-
-        // --- 4. Initiate Route Finding --- 
-        console.log("Attempting to call findWalkRoutes...");
-        try {
-             findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon);
-             console.log("findWalkRoutes call apparently completed.");
-        } catch (error) {
-             console.error("Error occurred *during* findWalkRoutes call (full error):", error);
-             resultsDiv.innerHTML += `<p>Error during route finding process: ${error.message || 'Unknown error'}.</p>`;
-             alert(`Error during route search: ${error.message || 'Unknown error'}. Check console.`);
-        }
-        console.log("processOsmData finished execution.");
-    } else {
-        console.error("Could not find a suitable starting node in the graph.");
-        resultsDiv.innerHTML += '<p>Error: Could not link postcode location to the path network.</p>';
-        alert("Could not find a starting point on the path network near the provided postcode.");
+    if (startNodeId === null || endNodeId === null) {
+         const missing = startNodeId === null ? "start" : "end";
+         console.error(`Could not find a suitable ${missing} node in the graph.`);
+         resultsDiv.innerHTML += `<p>Error: Could not link ${missing} postcode location to the path network.</p>`;
+         alert(`Could not find a starting/ending point on the path network near the provided ${missing} postcode.`);
+         return;
     }
+    
+    console.log(`Found start node: ${startNodeId}. Distance: ${minStartDistance.toFixed(1)}m`);
+    console.log(`Found end node: ${endNodeId}. Distance: ${minEndDistance.toFixed(1)}m`);
+    resultsDiv.innerHTML += `<p>Found network points: Start Node ${startNodeId} (${minStartDistance.toFixed(1)}m away), End Node ${endNodeId} (${minEndDistance.toFixed(1)}m away).</p>`;
+    
+    // --- DEBUG: Visualize the graph (Optional: could highlight start/end nodes differently) ---
+    _debugDrawGraph(graph, nodes, startLat, startLon); // Keep debugging based on start?
+
+    // --- 4. Initiate Route Finding --- 
+    console.log("Attempting to call findWalkRoutes...");
+    try {
+        // Pass startNodeId, endNodeId, and actual coordinates of endNode for heuristic
+        findWalkRoutes(graph, startNodeId, endNodeId, endNodeActualCoords.lat, endNodeActualCoords.lon);
+        console.log("findWalkRoutes call apparently completed.");
+    } catch (error) {
+        console.error("Error occurred *during* findWalkRoutes call (full error):", error);
+        resultsDiv.innerHTML += `<p>Error during route finding process: ${error.message || 'Unknown error'}.</p>`;
+        alert(`Error during route search: ${error.message || 'Unknown error'}. Check console.`);
+    }
+    console.log("processOsmData finished execution.");
 }
 
 // --- Step 6: Routing Algorithm ---
@@ -432,51 +447,52 @@ function findSortedIndex(array, element) {
     return low;
 }
 
-// A* Search Implementation (or Dijkstra's currently)
-async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startLon) {
-    console.log(`Starting A* route search from node ${startNodeId} for target length ${targetLength}m`);
-    console.log(`Received graph nodes: ${Object.keys(graph).length}, startNodeId: ${startNodeId}, targetLength: ${targetLength}, startLat: ${startLat}, startLon: ${startLon}`); // Log input parameters
+// A* Search Implementation for Point-to-Point
+async function findWalkRoutes(graph, startNodeId, endNodeId, endLat, endLon) {
+    console.log(`Starting A* route search from node ${startNodeId} to node ${endNodeId}`);
+    // Removed targetLength, startLat, startLon from params/logs
+    console.log(`Received graph nodes: ${Object.keys(graph).length}, startNodeId: ${startNodeId}, endNodeId: ${endNodeId}`); 
     
-    if (!graph || Object.keys(graph).length === 0 || !startNodeId || !targetLength || !startLat || !startLon) {
+    // Updated parameter check
+    if (!graph || Object.keys(graph).length === 0 || !startNodeId || !endNodeId || !endLat || !endLon) {
         console.error("findWalkRoutes called with invalid parameters!");
         return;
     }
 
     const startTime = Date.now();
-    const foundRoutes = [];
+    const foundRoutes = []; // Keep array in case we want top N shortest later
 
-    const minLength = targetLength * (1 - LENGTH_TOLERANCE_PERCENT);
-    const maxLength = targetLength * (1 + LENGTH_TOLERANCE_PERCENT);
-    // We might relax the absolute max length slightly for A*
-    const absoluteMaxLength = targetLength * ABSOLUTE_MAX_LENGTH_FACTOR; // Use constant factor
+    // Define end point for heuristic calculation
+    const endPoint = turf.point([endLon, endLat]);
 
-    // Maximum allowed straight-line distance from the start point (as a fraction of target length)
-    // This is a key pruning parameter - adjust if needed
-    // const MAX_DISTANCE_FACTOR = 0.75; // 75% of target length
-    const maxAllowedDistance = targetLength * MAX_DISTANCE_FACTOR;
-    console.log(`Max allowed straight-line distance from start: ${maxAllowedDistance.toFixed(0)}m`);
+    // --- REMOVE Length tolerance, absolute max length, distance pruning ---
+    // const minLength = ...
+    // const maxLength = ...
+    // const absoluteMaxLength = ...
+    // const maxAllowedDistance = ...
 
-    const startPoint = turf.point([startLon, startLat]);
-    const startNodeCoords = [startLon, startLat]; // Assuming startNodeId coords match startLat/startLon passed in
-
-    // Priority Queue (min-heap simulation using sorted array)
+    // Priority Queue
     const openSet = [];
-
     // gScore: cost from start to node
     const gScore = {}; 
     
+    // Initialize starting state
     try {
         gScore[startNodeId] = 0;
-        const initialHeuristic = turf.distance(startPoint, startPoint, {units: 'meters'}) + Math.abs(targetLength - 0);
+        // Calculate initial heuristic h: distance from startNode to endPoint
+        const startNodeData = nodes[startNodeId]; // Need nodes globally or passed in?
+        if (!startNodeData) throw new Error(`Start node ${startNodeId} data not found`);
+        const startNodePoint = turf.point([startNodeData.lon, startNodeData.lat]);
+        const initialHeuristic = turf.distance(startNodePoint, endPoint, {units: 'meters'});
+        
         openSet.push({ 
             nodeId: startNodeId, 
-            f: initialHeuristic, 
+            f: initialHeuristic, // f = g (0) + h
             g: 0, 
             path: [startNodeId], 
             geometry: [] 
         });
     } catch (error) {
-        // Log the full error object
         console.error("Error during A* initialization (full error):", error);
         document.getElementById('results').innerHTML += `<p>Error initializing route search: ${error.message || 'Unknown error'}.</p>`;
         alert(`Error initializing route search: ${error.message || 'Unknown error'}. Check console.`);
@@ -484,185 +500,115 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
     }
 
     let iterations = 0;
-    let prunedNodesCount = 0; 
-
-    clearRoutes();
+    clearRoutes(); // Clear previous routes/debug graph
     document.getElementById('results').innerHTML = '<p>Starting route search (A*)...</p>';
-
-    // console.log("A* Search: Initial openSet state:", JSON.stringify(openSet)); // Remove initial state log
-    if(openSet.length === 0) {
-        console.error("A* Search: openSet is empty before starting loop!");
-        return;
-    }
 
     while (openSet.length > 0) {
         iterations++;
-        // console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Remove log
-        // console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Remove log
+        // Basic timeout check still useful
+        if (iterations % 1000 === 0) { // Check less frequently
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
+                console.warn(`A* Route finding timed out after ${elapsedTime}ms`);
+                document.getElementById('results').innerHTML += '<p>Route search timed out (A*).</p>';
+                break; 
+            }
+        }
 
-        // Get node with the lowest f score (from the start of the sorted array)
+        // Get node with the lowest f score
         const current = openSet.shift(); 
-        // console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Remove log
-
         const currentNodeId = current.nodeId;
         const currentG = current.g;
 
-        // DEBUG: Log current node
-        // console.log(`Simplified Iter ${iterations} log: Processing Node ${currentNodeId}`); // Remove simplified log
-        // Log the actual path periodically - KEEP THIS ONE FOR NOW, it's less verbose
-        if(iterations % 500 === 0 || current.path.length > 50) { // Check less often, maybe longer paths
-            console.log(` -> Iter ${iterations}, Path: ${current.path.join(' -> ')}`);
-        }
-
-        // Get current node's coordinates (needed for distance pruning and heuristic)
-        // This relies on the geometry stored in the graph edges
-        let currentNodeCoords = startNodeCoords; // Default to start coords
-        if (current.geometry.length > 0) {
-            const lastSegment = current.geometry[current.geometry.length - 1];
-            if (lastSegment && lastSegment.length > 0) {
-                 currentNodeCoords = lastSegment[lastSegment.length - 1]; // Last point of last segment
-            }
-        }
-        const currentPoint = turf.point(currentNodeCoords);
-
-        // --- Distance-based pruning ---
-        // if (distanceToStart > maxAllowedDistance && currentNodeId !== startNodeId) { // Don't prune start node
-        //     prunedNodesCount++;
-        //     if (prunedNodesCount % 100 === 0) console.log(`Pruned ${prunedNodesCount} nodes due to distance.`);
-        //     continue; 
-        // } // Keep distance pruning commented out for now
-
         // --- Goal Check --- 
-        if (currentNodeId === startNodeId && current.path.length > 1) {
-            // DETAILED LOGGING HERE:
-            // console.log(`%cDEBUG: Goal Check - Reached start node ${startNodeId}.`, 'color: green; font-weight: bold;');
-            // console.log(` -> Path Length (g): ${currentG.toFixed(1)}m`);
-            // console.log(` -> Required Range: ${minLength.toFixed(1)}m - ${maxLength.toFixed(1)}m`);
-            // console.log(` -> Path Node Count: ${current.path.length}`);
-            // console.log(` -> Path Nodes: ${current.path.join(' -> ')}`); // Potentially very long log
-
-            // console.log(`DEBUG: Reached start node ${startNodeId} with length ${currentG.toFixed(0)}`); // Old log, replaced by detailed logs above
-            if (currentG >= minLength && currentG <= maxLength) {
-                const route = { length: currentG, path: current.path, geometry: current.geometry };
-                foundRoutes.push(route);
-                console.log(`%cDEBUG: Goal Check - Length is ACCEPTABLE. Storing route.`, 'color: green;'); // Keep this one?
-                // console.log(`A* Found route: Length ${currentG.toFixed(0)}m`); // Old log
-                document.getElementById('results').innerHTML += `<p>Found potential route: ${currentG.toFixed(0)}m</p>`;
-                if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
-                    console.log(`A* Found maximum number of routes (${MAX_ROUTES_TO_FIND}).`);
-                    break; // Exit main while loop
-                }
-            } else {
-                 // console.log(`%cDEBUG: Goal Check - Length is UNACCEPTABLE. Discarding path.`, 'color: orange;');
-            }
-             // Continue searching for other loops even if one is found
-             // But don't explore neighbors from the start node once a loop is completed this way
+        if (currentNodeId === endNodeId) {
+            console.log(`%cDEBUG: Goal Check - Reached END node ${endNodeId}!`, 'color: green; font-weight: bold;');
+            console.log(` -> Path Length (g): ${currentG.toFixed(1)}m`);
+            const route = { length: currentG, path: current.path, geometry: current.geometry };
+            foundRoutes.push(route);
+            console.log(`%cDEBUG: Found shortest route. Length: ${currentG.toFixed(1)}m. Storing route.`, 'color: green;');
+            break; // Found the shortest path, exit loop
         }
 
         // --- Explore Neighbors --- 
         const neighbors = graph[currentNodeId] || [];
-        // console.log(` -> Exploring ${neighbors.length} neighbors of ${currentNodeId}`); // Remove log
-        // console.log(`%c   BEGIN Exploring ${neighbors.length} neighbors of ${currentNodeId}...`, 'color: blue'); // Remove log
-
         for (const edge of neighbors) {
             const neighborId = edge.neighborId;
             const edgeLength = edge.length;
             const edgeGeometry = edge.geometry;
             const tentativeGScore = currentG + edgeLength;
 
-            // console.log(`  --> Considering neighbor ${neighborId} (Edge Length: ${edgeLength.toFixed(0)}, Tentative gScore: ${tentativeGScore.toFixed(0)})`); // Remove log
+            // --- REMOVE absolute path length pruning ---
 
-            // Specific check if neighbor is the start node
-            // if (neighborId === startNodeId) {
-            //      console.log(`%c      Neighbor IS the start node (${startNodeId})! Current path length: ${current.path.length}`, 'color: blue; font-style: italic;');
-            // }
-
-            // Pruning based on path length
-            if (tentativeGScore > absoluteMaxLength) {
-                 // console.log(`%c      Pruning neighbor ${neighborId}: Path would exceed very large absolute max length (${tentativeGScore.toFixed(0)} > ${absoluteMaxLength.toFixed(0)})`, 'color: grey'); // Remove log
+            // --- REMOVE U-turn prevention? (Usually desired for shortest path) ---
+            // Let's keep it for now
+            if (current.path.length > 1 && neighborId === current.path[current.path.length - 2]) {
                  continue;
             }
 
-            // Simple U-turn prevention - Allow returning to start node
-            if (current.path.length > 1 && neighborId === current.path[current.path.length - 2] && neighborId !== startNodeId) {
-                 // console.log(`      Pruning neighbor ${neighborId}: Immediate U-turn (and not the start node)`); // Remove log
-                 continue;
-            }
-
-            // Check if this path to neighbor is better than any previous one OR if it's returning to the start node
+            // Check if this path is better 
              const existingGScore = gScore[neighborId] || Infinity;
-             if (tentativeGScore < existingGScore || neighborId === startNodeId) {
-                 // If it's the start node, we don't necessarily update gScore[startNodeId] (it should remain 0 conceptually for future direct starts)
-                 // But we DO potentially update it for this specific path instance if this is a shorter loop than a previously found one returning here.
-                 // However, the primary goal is to get the state into the openSet for the Goal Check.
-                 if (neighborId !== startNodeId) {
-                    gScore[neighborId] = tentativeGScore;
-                 } else if (tentativeGScore < existingGScore) {
-                     // Update gScore for the start node only if this loop path is somehow shorter than 0? 
-                     // This case seems unlikely/impossible, but keeps the structure. 
-                     // We could also just skip updating gScore[startNodeId] entirely.
-                     gScore[neighborId] = tentativeGScore; 
-                 }
+             if (tentativeGScore < existingGScore) {
+                gScore[neighborId] = tentativeGScore;
 
-                // Get neighbor coordinates for heuristic (last point of edge geometry)
-                // let neighborCoords = currentNodeCoords;
-                // if (edgeGeometry && edgeGeometry.length > 0) {
-                //     neighborCoords = edgeGeometry[edgeGeometry.length - 1];
-                // }
-                // const neighborPoint = turf.point(neighborCoords);
-                
-                // const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}); // Simpler heuristic
-                const h = 0; // Set heuristic to 0 (Dijkstra's algorithm behavior)
-                const f = tentativeGScore + h; // Use h=0 directly
-                // console.log(`      Adding/Updating neighbor ${neighborId}: New g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`); // Remove log
+                // Calculate HEURISTIC (h): distance from neighbor to endPoint
+                let h = 0;
+                const neighborNodeData = nodes[neighborId]; // Need nodes globally or passed in?
+                if (neighborNodeData) {
+                    const neighborPoint = turf.point([neighborNodeData.lon, neighborNodeData.lat]);
+                    h = turf.distance(neighborPoint, endPoint, {units: 'meters'});
+                } else {
+                    console.warn(`Node data missing for neighbor ${neighborId} during heuristic calculation.`);
+                }
+
+                const f = tentativeGScore + h; // f = g + h
 
                 const newPath = [...current.path, neighborId];
                 const newGeometry = [...current.geometry, edgeGeometry];
-                
                 const newState = {
                     nodeId: neighborId,
-                    f: f,
-                    g: tentativeGScore,
-                    path: newPath,
-                    geometry: newGeometry
+                    f: f, g: tentativeGScore,
+                    path: newPath, geometry: newGeometry
                 };
-
-                // Insert into sorted openSet
                 const index = findSortedIndex(openSet, newState);
                 openSet.splice(index, 0, newState);
-            } else {
-                 // console.log(`      Skipping neighbor ${neighborId}: Worse path found (Existing g=${existingGScore.toFixed(0)}, New g=${tentativeGScore.toFixed(0)})`); // Remove log
-             }
+            }
         }
-        // console.log(`%c   END Exploring neighbors of ${currentNodeId}.`, 'color: blue'); // Remove log
     }
 
     // --- Log reason for loop termination ---
     const endTime = Date.now();
     let terminationReason = "Unknown";
-    if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
-        terminationReason = "Found maximum routes";
+    if (foundRoutes.length > 0) { // Check if we found the route
+        terminationReason = "Found shortest path to end node";
     } else if (Date.now() - startTime >= ROUTE_FINDING_TIMEOUT_MS) {
         terminationReason = "Timeout reached";
     } else if (openSet.length === 0) {
-        terminationReason = "OpenSet became empty";
+        terminationReason = "OpenSet became empty (End node unreachable?)";
     }
-    console.log(`A* Route search finished in ${endTime - startTime}ms. Reason: ${terminationReason}. Found ${foundRoutes.length} routes.`);
-    // --- End Log ---
+    console.log(`A* Route search finished in ${endTime - startTime}ms. Reason: ${terminationReason}. Found ${foundRoutes.length} route(s).`);
 
+    // --- Process and display the single shortest route --- 
     if (foundRoutes.length > 0) {
-        document.getElementById('results').innerHTML += `<h3>Found ${foundRoutes.length} route(s) using A*:</h3><ul>`;
-        foundRoutes.forEach((route, index) => {
-            console.log(`Route ${index + 1}: Length=${route.length.toFixed(0)}m, Nodes=${route.path.length}`);
-            document.getElementById('results').innerHTML += `<li>Route ${index + 1}: ${route.length.toFixed(0)}m</li>`;
-            drawRoute(route, index);
-        });
+        const shortestRoute = foundRoutes[0]; // Should only be one
+        document.getElementById('results').innerHTML += `<h3>Found Route:</h3><ul>`;
+        console.log(`Shortest Route: Length=${shortestRoute.length.toFixed(0)}m, Nodes=${shortestRoute.path.length}`);
+        document.getElementById('results').innerHTML += `<li>Route Length: ${shortestRoute.length.toFixed(0)}m</li>`;
+        drawRoute(shortestRoute, 0); // Draw the single route
         document.getElementById('results').innerHTML += `</ul>`;
-    } else {
-        document.getElementById('results').innerHTML += `<p>No suitable loops found with A* within the time limit and criteria.</p>`;
-        if (Date.now() - startTime < ROUTE_FINDING_TIMEOUT_MS) {
-            alert("Could not find any walking loops matching your criteria using A*. Try changing length/postcode.");
+        // Fit map to the route bounds
+        try {
+            const routeLine = L.polyline(shortestRoute.geometry.map(seg => seg.map(coord => [coord[1], coord[0]])).flat());
+            if (routeLine.getLatLngs().length > 0) {
+                 map.fitBounds(routeLine.getBounds());
+            }
+        } catch (e) {
+            console.error("Error fitting map bounds to route:", e);
         }
+
+    } else {
+        document.getElementById('results').innerHTML += `<p>Could not find a route between the start and end points.</p>`;
+        alert("Could not find a route. The points may not be connected on the path network, or the search timed out.");
     }
 }
 
