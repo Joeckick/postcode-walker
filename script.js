@@ -4,7 +4,7 @@ const OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter';
 const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds
 const LENGTH_TOLERANCE_PERCENT = 0.40; // +/- 40% (Increased from 20%)
 const MAX_ROUTES_TO_FIND = 5;
-const ABSOLUTE_MAX_LENGTH_FACTOR = 10.0; // Factor for pruning paths much longer than target
+const ABSOLUTE_MAX_LENGTH_FACTOR = 3.0; // Factor for pruning paths much longer than target (Reduced from 10)
 const MAX_DISTANCE_FACTOR = 10.0; // Factor for distance-based pruning (currently high)
 const NEAR_START_THRESHOLD_METERS = 50; // For debug graph visualization
 
@@ -489,7 +489,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
     clearRoutes();
     document.getElementById('results').innerHTML = '<p>Starting route search (A*)...</p>';
 
-    console.log("A* Search: Initial openSet state:", JSON.stringify(openSet)); // Log initial openSet
+    // console.log("A* Search: Initial openSet state:", JSON.stringify(openSet)); // Remove initial state log
     if(openSet.length === 0) {
         console.error("A* Search: openSet is empty before starting loop!");
         return;
@@ -497,44 +497,21 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
     while (openSet.length > 0) {
         iterations++;
-        console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Simple log
-        console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Log simplified openSet state
+        // console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Remove log
+        // console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Remove log
 
         // Get node with the lowest f score (from the start of the sorted array)
         const current = openSet.shift(); 
-        console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Log shifted node
+        // console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Remove log
 
         const currentNodeId = current.nodeId;
         const currentG = current.g;
 
-        // --- Debug Log: Check neighbors if current node is a neighbor of start ---
-/*
-        // Use defined startNodeId from outer scope
-        if (currentNodeId === 1178886671 || currentNodeId === 11405372363) { // Hardcoding IDs from previous log for NW1 4RY
-            const currentCoordsLog = nodes[currentNodeId] ? `(${nodes[currentNodeId].lat.toFixed(5)}, ${nodes[currentNodeId].lon.toFixed(5)})` : '(Coords not found)';
-            console.log(`%cDEBUG: Processing node ${currentNodeId} ${currentCoordsLog} (a direct neighbor of start node ${startNodeId})`, 'color: purple;');
-            const itsNeighbors = graph[currentNodeId] || [];
-            if (itsNeighbors.length > 0) {
-                itsNeighbors.forEach(edge => {
-                     const neighborCoordsLog = nodes[edge.neighborId] ? `(${nodes[edge.neighborId].lat.toFixed(5)}, ${nodes[edge.neighborId].lon.toFixed(5)})` : '(Coords not found)';
-                     let isStartNode = edge.neighborId === startNodeId ? ' (IS START NODE)' : '';
-                     console.log(`   -> Its Neighbor: ${edge.neighborId} ${neighborCoordsLog} (Length: ${edge.length.toFixed(1)}m)${isStartNode}`);
-                });
-            } else {
-                console.log('   -> No neighbors listed!');
-            }
-            // console.log(`   Neighbors according to graph[${currentNodeId}]:`, graph[currentNodeId] || 'No neighbors listed!'); // Old log
-        }
-*/
-        // --- End Debug Log ---
-
         // DEBUG: Log current node
-        // More detailed log
-        // console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, pathLen=${current.path.length}, openSet: ${openSet.length}`); // Line 532
-        console.log(`Simplified Iter ${iterations} log: Processing Node ${currentNodeId}`); // Simplified log
-        // Log the actual path periodically
-        if(iterations % 100 === 0 || current.path.length > 15) { // Log every 100 iter or if path gets long
-            console.log(` -> Path: ${current.path.join(' -> ')}`);
+        // console.log(`Simplified Iter ${iterations} log: Processing Node ${currentNodeId}`); // Remove simplified log
+        // Log the actual path periodically - KEEP THIS ONE FOR NOW, it's less verbose
+        if(iterations % 500 === 0 || current.path.length > 50) { // Check less often, maybe longer paths
+            console.log(` -> Iter ${iterations}, Path: ${current.path.join(' -> ')}`);
         }
 
         // Get current node's coordinates (needed for distance pruning and heuristic)
@@ -549,12 +526,11 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         const currentPoint = turf.point(currentNodeCoords);
 
         // --- Distance-based pruning ---
-        const distanceToStart = turf.distance(startPoint, currentPoint, { units: 'meters' });
-        if (distanceToStart > maxAllowedDistance && currentNodeId !== startNodeId) { // Don't prune start node
-            prunedNodesCount++;
-            if (prunedNodesCount % 100 === 0) console.log(`Pruned ${prunedNodesCount} nodes due to distance.`);
-            continue; 
-        }
+        // if (distanceToStart > maxAllowedDistance && currentNodeId !== startNodeId) { // Don't prune start node
+        //     prunedNodesCount++;
+        //     if (prunedNodesCount % 100 === 0) console.log(`Pruned ${prunedNodesCount} nodes due to distance.`);
+        //     continue; 
+        // } // Keep distance pruning commented out for now
 
         // --- Goal Check --- 
         if (currentNodeId === startNodeId && current.path.length > 1) {
@@ -585,8 +561,8 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
         // --- Explore Neighbors --- 
         const neighbors = graph[currentNodeId] || [];
-        // console.log(` -> Exploring ${neighbors.length} neighbors of ${currentNodeId}`); // Keep commented for now
-        console.log(`%c   BEGIN Exploring ${neighbors.length} neighbors of ${currentNodeId}...`, 'color: blue'); // New log
+        // console.log(` -> Exploring ${neighbors.length} neighbors of ${currentNodeId}`); // Remove log
+        // console.log(`%c   BEGIN Exploring ${neighbors.length} neighbors of ${currentNodeId}...`, 'color: blue'); // Remove log
 
         for (const edge of neighbors) {
             const neighborId = edge.neighborId;
@@ -594,7 +570,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
             const edgeGeometry = edge.geometry;
             const tentativeGScore = currentG + edgeLength;
 
-            console.log(`  --> Considering neighbor ${neighborId} (Edge Length: ${edgeLength.toFixed(0)}, Tentative gScore: ${tentativeGScore.toFixed(0)})`); // Log neighbor consideration
+            // console.log(`  --> Considering neighbor ${neighborId} (Edge Length: ${edgeLength.toFixed(0)}, Tentative gScore: ${tentativeGScore.toFixed(0)})`); // Remove log
 
             // Specific check if neighbor is the start node
             // if (neighborId === startNodeId) {
@@ -603,19 +579,18 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
             // Pruning based on path length
             if (tentativeGScore > absoluteMaxLength) {
-                 console.log(`%c      Pruning neighbor ${neighborId}: Path would exceed very large absolute max length (${tentativeGScore.toFixed(0)} > ${absoluteMaxLength.toFixed(0)})`, 'color: grey');
+                 // console.log(`%c      Pruning neighbor ${neighborId}: Path would exceed very large absolute max length (${tentativeGScore.toFixed(0)} > ${absoluteMaxLength.toFixed(0)})`, 'color: grey'); // Remove log
                  continue;
             }
 
             // Simple U-turn prevention - Allow returning to start node
             if (current.path.length > 1 && neighborId === current.path[current.path.length - 2] && neighborId !== startNodeId) {
-                 console.log(`      Pruning neighbor ${neighborId}: Immediate U-turn (and not the start node)`);
+                 // console.log(`      Pruning neighbor ${neighborId}: Immediate U-turn (and not the start node)`); // Remove log
                  continue;
             }
 
             // Check if this path to neighbor is better than any previous one OR if it's returning to the start node
              const existingGScore = gScore[neighborId] || Infinity;
-             // Allow adding the start node back even if the path is longer than the initial gScore (0)
              if (tentativeGScore < existingGScore || neighborId === startNodeId) {
                  // If it's the start node, we don't necessarily update gScore[startNodeId] (it should remain 0 conceptually for future direct starts)
                  // But we DO potentially update it for this specific path instance if this is a shorter loop than a previously found one returning here.
@@ -638,8 +613,8 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                 
                 // const h = turf.distance(neighborPoint, startPoint, {units: 'meters'}); // Simpler heuristic
                 const h = 0; // Set heuristic to 0 (Dijkstra's algorithm behavior)
-                const f = tentativeGScore + h; // f score is now just the path cost
-                console.log(`      Adding/Updating neighbor ${neighborId}: New g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`); // Log adding state
+                const f = tentativeGScore + h; // Use h=0 directly
+                // console.log(`      Adding/Updating neighbor ${neighborId}: New g=${tentativeGScore.toFixed(0)}, h=${h.toFixed(0)}, f=${f.toFixed(0)}`); // Remove log
 
                 const newPath = [...current.path, neighborId];
                 const newGeometry = [...current.geometry, edgeGeometry];
@@ -656,10 +631,10 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                 const index = findSortedIndex(openSet, newState);
                 openSet.splice(index, 0, newState);
             } else {
-                 console.log(`      Skipping neighbor ${neighborId}: Worse path found (Existing g=${existingGScore.toFixed(0)}, New g=${tentativeGScore.toFixed(0)})`); // Log skipping due to gScore
+                 // console.log(`      Skipping neighbor ${neighborId}: Worse path found (Existing g=${existingGScore.toFixed(0)}, New g=${tentativeGScore.toFixed(0)})`); // Remove log
              }
         }
-        console.log(`%c   END Exploring neighbors of ${currentNodeId}.`, 'color: blue'); // New log
+        // console.log(`%c   END Exploring neighbors of ${currentNodeId}.`, 'color: blue'); // Remove log
     }
 
     // --- Log reason for loop termination ---
