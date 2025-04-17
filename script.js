@@ -52,107 +52,159 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function findRoutes() {
-    console.log("Find routes button clicked!");
+    console.log("Find walk button clicked!"); 
     const startPostcode = document.getElementById('postcode').value.trim();
-    // *** COMMENTED OUT DEBUG log for element check on click ***
-    const endPostcodeElement = document.getElementById('end_postcode');
-    // console.log("DEBUG (findRoutes): Element with ID 'end_postcode_input':", endPostcodeElement); // Removed debug log
-    if (!endPostcodeElement) { // Add a check here just in case
-        console.error("Could not find the end postcode input element!");
-        alert("Error: Could not find the end postcode input element.");
-        return;
-    }
-    const endPostcode = endPostcodeElement.value.trim(); // Get end postcode using correct ID
-    // const desiredLengthMeters = parseInt(lengthInput); // Removed length input
+    const distanceInput = document.getElementById('desired_distance').value;
+    const desiredDistanceKm = parseFloat(distanceInput);
+    const walkType = document.querySelector('input[name="walk_type"]:checked').value;
 
-    console.log(`Searching for route from ${startPostcode} to ${endPostcode}`);
     const resultsDiv = document.getElementById('results');
-    resultsDiv.innerHTML = ''; // Clear previous results
+    const spinner = document.getElementById('loading-spinner'); 
+    
+    // Clear previous results and show spinner
+    resultsDiv.innerHTML = '<h2>Results</h2>'; // Clear previous text content
+    if (spinner) spinner.classList.remove('hidden'); 
 
-    if (!startPostcode || !endPostcode) { // Check both postcodes
-        alert("Please enter both a start and end UK postcode.");
+    // --- Input Validation ---
+    if (!startPostcode) {
+        if (spinner) spinner.classList.add('hidden');
+        alert("Please enter a start UK postcode.");
         return;
     }
-    // Removed length validation
+    if (isNaN(desiredDistanceKm) || desiredDistanceKm <= 0) {
+        if (spinner) spinner.classList.add('hidden');
+        alert("Please enter a valid positive number for the desired distance.");
+        return;
+    }
+    const desiredDistanceMeters = desiredDistanceKm * 1000;
+    console.log(`Looking for ${walkType} walk starting from ${startPostcode}, aiming for approx. ${desiredDistanceKm} km (${desiredDistanceMeters}m)`); // Updated log
 
     if (!map) {
         console.error("Map is not initialized yet.");
+        if (spinner) spinner.classList.add('hidden');
         alert("Map is not ready. Please wait and try again.");
         return;
     }
-
-    resultsDiv.innerHTML = '<p>Looking up postcodes...</p>';
-    let startCoords, endCoords;
-    try {
-        // Lookup both postcodes
-        startCoords = await lookupPostcodeCoords(startPostcode);
-        endCoords = await lookupPostcodeCoords(endPostcode);
-        console.log(`Start Coords: Lat: ${startCoords.latitude}, Lon: ${startCoords.longitude}`);
-        console.log(`End Coords: Lat: ${endCoords.latitude}, Lon: ${endCoords.longitude}`);
-        resultsDiv.innerHTML = `<p>Found locations for ${startCoords.postcode} and ${endCoords.postcode}. Fetching map data...</p>`;
-
-        // Clear previous map markers/routes if necessary (clearRoutes might need adjustment)
-        clearRoutes();
-
-        // Center map roughly between start and end? Or just on start?
-        // Let's fit bounds later after finding the route.
-        map.setView([startCoords.latitude, startCoords.longitude], 13); // Adjust zoom?
-        L.marker([startCoords.latitude, startCoords.longitude]).addTo(map)
-            .bindPopup(`Start: ${startCoords.postcode}`)
-            .openPopup();
-        L.marker([endCoords.latitude, endCoords.longitude]).addTo(map)
-            .bindPopup(`End: ${endCoords.postcode}`);
-
-    } catch (error) {
-        console.error(error);
-        alert(error.message);
-        resultsDiv.innerHTML = `<p>${error.message}</p>`;
-        return;
-    }
-
-    // Calculate bounding box for fetching OSM data
-    let searchBbox;
-    try {
-        const bufferDistance = 0.005; // Approx 500m buffer in degrees (adjust as needed)
-        const startPoint = turf.point([startCoords.longitude, startCoords.latitude]);
-        const endPoint = turf.point([endCoords.longitude, endCoords.latitude]);
-        const features = turf.featureCollection([startPoint, endPoint]);
-        const rawBbox = turf.bbox(features); // [minLon, minLat, maxLon, maxLat]
-        // Add buffer
-        searchBbox = [
-            rawBbox[0] - bufferDistance,
-            rawBbox[1] - bufferDistance,
-            rawBbox[2] + bufferDistance,
-            rawBbox[3] + bufferDistance
-        ];
-    } catch(e) {
-        console.error("Error calculating bounding box:", e);
-        alert("Could not calculate the area to search for map data.");
-        resultsDiv.innerHTML = `<p>Error calculating map area.</p>`;
-        return;
-    }
     
-    // Fetch OSM Data using the bounding box
-    // const fetchRadius = 5000; // No longer used
+    // --- Fetch OSM Data & Process (Common Logic) --- 
+    let graph, nodes, startNodeId; // Define variables in outer scope
     try {
-        // Call the updated function with the calculated bounding box
+        resultsDiv.innerHTML += `<p>Looking up start postcode...</p>`;
+        let startCoords;
+        try {
+            startCoords = await lookupPostcodeCoords(startPostcode);
+            console.log(`Start Coords: Lat: ${startCoords.latitude}, Lon: ${startCoords.longitude}`);
+            clearRoutes();
+            map.setView([startCoords.latitude, startCoords.longitude], 14); 
+            L.marker([startCoords.latitude, startCoords.longitude]).addTo(map)
+                .bindPopup(`Start: ${startCoords.postcode}`)
+                .openPopup();
+        } catch (error) {
+            console.error(error);
+            resultsDiv.innerHTML = `<p>${error.message}</p>`;
+            alert(error.message);
+            if (spinner) spinner.classList.add('hidden');
+            return; 
+        }
+        
+        resultsDiv.innerHTML += `<p>Calculating search area...</p>`;
+        let searchBbox;
+        try {
+            const bufferFactor = 1.5; 
+            const approxRadiusLat = (desiredDistanceMeters * bufferFactor) / 111000; 
+            const approxRadiusLon = approxRadiusLat / Math.cos(startCoords.latitude * Math.PI / 180);
+            searchBbox = [
+                startCoords.longitude - approxRadiusLon,
+                startCoords.latitude - approxRadiusLat,
+                startCoords.longitude + approxRadiusLon,
+                startCoords.latitude + approxRadiusLat
+            ];
+            console.log("Calculated search bbox:", searchBbox);
+        } catch(e) {
+            console.error("Error calculating bounding box:", e);
+            resultsDiv.innerHTML = `<p>Error calculating map area.</p>`;
+            alert("Could not calculate the area to search for map data.");
+            if (spinner) spinner.classList.add('hidden');
+            return; 
+        }
+
+        resultsDiv.innerHTML += `<p>Fetching map data for the area...</p>`;
         const osmData = await fetchOsmDataInBbox(searchBbox);
         if (osmData.elements.length === 0) {
-             resultsDiv.innerHTML += '<p>No map features (paths, roads) found in the Overpass response for the area between the postcodes.</p>'; // Updated message
-             alert("Map data received, but it contained no usable paths for this specific area.");
-             return;
+             resultsDiv.innerHTML = '<p>No map features (paths, roads) found for the area.</p>';
+             alert("No map data found for this area.");
+             if (spinner) spinner.classList.add('hidden');
+             return; 
         }
-        resultsDiv.innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Processing data...</p>`;
+        resultsDiv.innerHTML += `<p>Fetched ${osmData.elements.length} map elements. Processing data...</p>`;
+        
+        // Assign processed data to outer scope variables
+        ({ graph, nodes, startNodeId } = processOsmData(osmData, startCoords.latitude, startCoords.longitude));
 
-        // Start the processing and routing - pass both start and end coords
-        processOsmData(osmData, startCoords.latitude, startCoords.longitude, endCoords.latitude, endCoords.longitude);
+        // --- Branch based on walk type --- 
+        if (walkType === 'one_way') {
+            console.log("Finding one-way walk...");
+            resultsDiv.innerHTML += `<p>Searching for a one-way walk near ${desiredDistanceKm} km...</p>`;
+            const route = await findWalkNearDistance(graph, nodes, startNodeId, desiredDistanceMeters);
+
+            // Process route result (existing logic)
+            if (route && route.segments && route.segments.length > 0) {
+                 console.log(`Found walk: Length=${route.length.toFixed(0)}m, Segments=${route.segments.length}`);
+                 resultsDiv.innerHTML += `<h3>Found Walk:</h3><ul>`;
+                 resultsDiv.innerHTML += `<li>Approx. Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)</li>`;
+                 if (nodes && route.path && route.path.length > 0) {
+                      const endNodeId = route.path[route.path.length - 1];
+                      const endNodeCoords = nodes[endNodeId];
+                      if(endNodeCoords) {
+                          L.marker([endNodeCoords.lat, endNodeCoords.lon]).addTo(map)
+                              .bindPopup(`End (Node ${endNodeId})`);
+                      }
+                 }
+                 drawRoute(route, 0);
+                 resultsDiv.innerHTML += `</ul>`;
+                 const instructionsHtml = generateInstructions(route.segments);
+                 document.getElementById('results').innerHTML += instructionsHtml;
+                 try {
+                     const routeLine = L.polyline(route.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
+                     if (routeLine.getLatLngs().length > 0) {
+                          map.fitBounds(routeLine.getBounds().pad(0.1)); 
+                     }
+                 } catch (e) {
+                     console.error("Error fitting map bounds to route:", e);
+                 }
+            } else {
+                 resultsDiv.innerHTML = `<p>Could not find a suitable one-way walk near ${desiredDistanceKm} km.</p>`;
+                 alert(`Could not find a walk. Try a different distance or start point.`);
+            }
+
+        } else if (walkType === 'round_trip') {
+            console.log("Round trip selected. Logic not yet implemented.");
+            resultsDiv.innerHTML = `<p>Round trip walk finding is not yet implemented.</p>`;
+            // TODO: Implement Steps 3, 4, 5 for round trip
+        
+        } else {
+            console.error("Unknown walk type selected:", walkType);
+            resultsDiv.innerHTML = `<p>Error: Unknown walk type selected.</p>`;
+            alert("An unexpected error occurred with the walk type selection.");
+        }
+        // --- End branch ---
 
     } catch (error) {
-         console.error(error);
-         alert(error.message);
-         resultsDiv.innerHTML += `<p>${error.message}. The Overpass API might be busy.</p>`;
-    }
-}
+         // Catch errors from common processing or specific walk type logic
+         console.error("Error during walk finding process:", error);
+         // Ensure resultsDiv shows the error if not already set by specific catch blocks
+         if (!resultsDiv.innerHTML.includes("Error") && !resultsDiv.innerHTML.includes("Could not find")) {
+             resultsDiv.innerHTML = `<p>An unexpected error occurred: ${error.message}</p>`; 
+         }
+         // Optionally re-alert or handle differently
+         // alert(`An error occurred during processing: ${error.message}`); 
+     } finally {
+         // Ensure spinner is hidden when done (success or error)
+         if (spinner) { // Check if spinner element exists
+             spinner.classList.add('hidden'); 
+         }
+     }
+} // End of findRoutes function
 
 async function lookupPostcodeCoords(postcode) {
     const url = `${POSTCODES_IO_API_URL}${encodeURIComponent(postcode)}`;
