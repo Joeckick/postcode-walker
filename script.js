@@ -55,7 +55,7 @@ async function findRoutes() {
     console.log("Find routes button clicked!");
     const startPostcode = document.getElementById('postcode').value.trim();
     // *** COMMENTED OUT DEBUG log for element check on click ***
-    const endPostcodeElement = document.getElementById('end_postcode_input');
+    const endPostcodeElement = document.getElementById('end_postcode');
     // console.log("DEBUG (findRoutes): Element with ID 'end_postcode_input':", endPostcodeElement); // Removed debug log
     if (!endPostcodeElement) { // Add a check here just in case
         console.error("Could not find the end postcode input element!");
