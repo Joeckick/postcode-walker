@@ -110,15 +110,35 @@ async function findRoutes() {
         return;
     }
 
-    // Fetch OSM Data - Use a bounding box or just radius around start?
-    // For now, keep radius around start, but make it larger or dependent on distance?
-    // Let's use a fixed large radius for simplicity first.
-    const fetchRadius = 5000; // Use a fixed radius around the start point
+    // Calculate bounding box for fetching OSM data
+    let searchBbox;
     try {
-        // Pass only start coords for fetching
-        const osmData = await fetchOsmDataNear(startCoords.latitude, startCoords.longitude, fetchRadius);
+        const bufferDistance = 0.005; // Approx 500m buffer in degrees (adjust as needed)
+        const startPoint = turf.point([startCoords.longitude, startCoords.latitude]);
+        const endPoint = turf.point([endCoords.longitude, endCoords.latitude]);
+        const features = turf.featureCollection([startPoint, endPoint]);
+        const rawBbox = turf.bbox(features); // [minLon, minLat, maxLon, maxLat]
+        // Add buffer
+        searchBbox = [
+            rawBbox[0] - bufferDistance,
+            rawBbox[1] - bufferDistance,
+            rawBbox[2] + bufferDistance,
+            rawBbox[3] + bufferDistance
+        ];
+    } catch(e) {
+        console.error("Error calculating bounding box:", e);
+        alert("Could not calculate the area to search for map data.");
+        resultsDiv.innerHTML = `<p>Error calculating map area.</p>`;
+        return;
+    }
+    
+    // Fetch OSM Data using the bounding box
+    // const fetchRadius = 5000; // No longer used
+    try {
+        // Call the updated function with the calculated bounding box
+        const osmData = await fetchOsmDataInBbox(searchBbox);
         if (osmData.elements.length === 0) {
-             resultsDiv.innerHTML += '<p>No map features (paths, roads) found in the Overpass response for this area.</p>';
+             resultsDiv.innerHTML += '<p>No map features (paths, roads) found in the Overpass response for the area between the postcodes.</p>'; // Updated message
              alert("Map data received, but it contained no usable paths for this specific area.");
              return;
         }
@@ -155,16 +175,22 @@ async function lookupPostcodeCoords(postcode) {
     }
 }
 
-async function fetchOsmDataNear(lat, lon, radius) { // Simplified parameters
-    console.log(`Fetching OSM data around ${lat}, ${lon} with radius ${radius}m`);
-    // Removed radius calculation based on length
-
+// Renamed function and changed parameters
+async function fetchOsmDataInBbox(bbox) { 
+    // Bbox is expected as [minLon, minLat, maxLon, maxLat]
+    if (!bbox || bbox.length !== 4) {
+        throw new Error("Invalid bounding box provided to fetchOsmDataInBbox.");
+    }
+    const bboxString = `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]}`; // Overpass format: south,west,north,east
+    console.log(`Fetching OSM data within bbox: ${bboxString}`);
+    
+    // Updated Overpass query to use bbox
     const query = `
-        [out:json][timeout:30];
+        [out:json][timeout:60]; // Increased timeout slightly
         (
           way
             ["highway"~"^(footway|path|pedestrian|track|residential|living_street|service|unclassified|tertiary)$"]
-            (around:${radius},${lat},${lon});
+            (${bboxString}); // Use bbox directly
         );
         out body;
         >;
