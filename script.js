@@ -529,9 +529,9 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         // --- End Debug Log ---
 
         // DEBUG: Log current node
-        // if(iterations % 200 === 0) console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, openSet size: ${openSet.length}`);
         // More detailed log
-        console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, pathLen=${current.path.length}, openSet: ${openSet.length}`);
+        // console.log(`Iter ${iterations}: Processing Node ${currentNodeId}, g=${currentG.toFixed(0)}, f=${current.f.toFixed(0)}, pathLen=${current.path.length}, openSet: ${openSet.length}`); // Line 532
+        console.log(`Simplified Iter ${iterations} log: Processing Node ${currentNodeId}`); // Simplified log
         // Log the actual path periodically
         if(iterations % 100 === 0 || current.path.length > 15) { // Log every 100 iter or if path gets long
             console.log(` -> Path: ${current.path.join(' -> ')}`);
