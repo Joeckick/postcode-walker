@@ -494,30 +494,34 @@ function processOsmData(osmData, startLat, startLon) {
 
         Object.keys(graph).forEach(nodeId => {
             const nodeData = nodes[nodeId];
-            // Add check for valid nodeData and numeric coordinates
+            // RE-ADD check for valid nodeData and numeric coordinates INSIDE LOOP
             if (nodeData && typeof nodeData.lat === 'number' && typeof nodeData.lon === 'number') {
-                try { // Wrap Turf calls in separate try-catch for safety
+                try { 
                     const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
-                    const distToStart = turf.distance(startPoint, nodePoint, { units: 'meters' });
+                    // Calculate distance ONLY if nodePoint is valid
+                    const distToStart = turf.distance(startPoint, nodePoint, { units: 'meters' }); 
                     if (distToStart < minStartDistance) {
                         minStartDistance = distToStart;
                         startNodeId = parseInt(nodeId);
                         startNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
                     }
                 } catch (turfError) {
-                     console.warn(`Turf.js error processing node ${nodeId} - skipping node.`, turfError);
+                     // Catch errors specifically from turf.point or turf.distance
+                     console.warn(`Turf.js error processing node ${nodeId} data - skipping node.`, turfError);
                 }
             } else {
-                // Log nodes with missing/invalid data if needed for debugging
-                if (nodeId !== undefined) { // Avoid logging if nodeId itself is bad
+                // Log nodes with missing/invalid data
+                if (nodeId !== undefined) { 
                      console.warn(`Skipping node ${nodeId} due to missing or non-numeric lat/lon:`, nodeData);
                 }
             }
         });
     } catch (error) {
-         console.error("Error finding closest start/end nodes:", error);
-         alert(`Error linking postcode to path network: ${error.message}`);
-         resultsDiv.innerHTML += '<p>Error linking postcode to path network.</p>';
+         // Catch errors from creating startPoint or other general errors
+         const errorMsg = "Error finding closest start node to path network.";
+         console.error(errorMsg, error);
+         alert(errorMsg);
+         resultsDiv.innerHTML += `<p>${errorMsg}: ${error.message}</p>`;
          return;
     }
 
