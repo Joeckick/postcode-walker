@@ -539,18 +539,19 @@ function processOsmData(osmData, startLat, startLon) {
     // _debugDrawGraph(graph, nodes, startLat, startLon);
 
     // --- 4. Initiate Route Finding --- 
-    console.log("Attempting to call findWalkRoutes...");
-    try {
+    //console.log("Attempting to call findWalkRoutes...");
+    //try {
         // Pass startNodeId, and actual coordinates of startNode for heuristic
         // *** Also pass the nodes object for heuristic calculations inside A* ***
-        findWalkRoutes(graph, nodes, startNodeId, startNodeActualCoords.lat, startNodeActualCoords.lon);
-        console.log("findWalkRoutes call apparently completed.");
-    } catch (error) {
-        console.error("Error occurred *during* findWalkRoutes call (full error):", error);
-        resultsDiv.innerHTML += `<p>Error during route finding process: ${error.message || 'Unknown error'}.</p>`;
-        alert(`Error during route search: ${error.message || 'Unknown error'}. Check console.`);
-    }
-    console.log("processOsmData finished execution.");
+       // findWalkRoutes(graph, nodes, startNodeId, startNodeActualCoords.lat, startNodeActualCoords.lon);
+        //console.log("findWalkRoutes call apparently completed.");
+    // } catch (error) {
+        //console.error("Error occurred *during* findWalkRoutes call (full error):", error);
+        //resultsDiv.innerHTML += `<p>Error during route finding process: ${error.message || 'Unknown error'}.</p>`;
+        // alert(`Error during route search: ${error.message || 'Unknown error'}. Check console.`);
+       return { graph, nodes, startNodeId };
+    // }
+   // console.log("processOsmData finished execution.");
 }
 
 // --- Step 6: Routing Algorithm ---
