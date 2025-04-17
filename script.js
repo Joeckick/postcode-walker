@@ -1,3 +1,13 @@
+// --- Configuration Constants ---
+const POSTCODES_IO_API_URL = 'https://api.postcodes.io/postcodes/';
+const OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter';
+const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds
+const LENGTH_TOLERANCE_PERCENT = 0.20; // +/- 20%
+const MAX_ROUTES_TO_FIND = 5;
+const ABSOLUTE_MAX_LENGTH_FACTOR = 10.0; // Factor for pruning paths much longer than target
+const MAX_DISTANCE_FACTOR = 10.0; // Factor for distance-based pruning (currently high)
+const NEAR_START_THRESHOLD_METERS = 50; // For debug graph visualization
+
 console.log("Script loaded.");
 
 // Define map variable in a higher scope
@@ -39,11 +49,19 @@ document.addEventListener('DOMContentLoaded', () => {
 async function findRoutes() {
     console.log("Find routes button clicked!");
     const postcode = document.getElementById('postcode').value.trim();
-    const length = document.getElementById('length').value;
-    console.log(`Searching for routes near ${postcode} of length ${length}m`);
+    const lengthInput = document.getElementById('length').value;
+    const desiredLengthMeters = parseInt(lengthInput);
+
+    console.log(`Searching for routes near ${postcode} of length ${desiredLengthMeters}m`);
+    const resultsDiv = document.getElementById('results');
+    resultsDiv.innerHTML = ''; // Clear previous results
 
     if (!postcode) {
         alert("Please enter a UK postcode.");
+        return;
+    }
+    if (isNaN(desiredLengthMeters) || desiredLengthMeters <= 0) {
+        alert("Please enter a valid desired walk length in meters.");
         return;
     }
 
@@ -53,49 +71,68 @@ async function findRoutes() {
         return;
     }
 
-    // Add a simple loading indicator (optional, can be improved)
-    document.getElementById('results').innerHTML = '<p>Looking up postcode...</p>';
+    resultsDiv.innerHTML = '<p>Looking up postcode...</p>';
+    let coords;
+    try {
+        coords = await lookupPostcodeCoords(postcode);
+        console.log(`Coordinates found: Lat: ${coords.latitude}, Lon: ${coords.longitude}`);
+        resultsDiv.innerHTML = `<p>Found location for ${coords.postcode}. Fetching map data...</p>`;
+
+        // Center map and add marker
+        map.setView([coords.latitude, coords.longitude], 15);
+        L.marker([coords.latitude, coords.longitude]).addTo(map)
+            .bindPopup(`Start: ${coords.postcode}`)
+            .openPopup();
+
+    } catch (error) {
+        console.error(error);
+        alert(error.message);
+        resultsDiv.innerHTML = `<p>${error.message}</p>`;
+        return;
+    }
 
     try {
-        // Use postcodes.io API
-        const response = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
+        const osmData = await fetchOsmDataNear(coords.latitude, coords.longitude, desiredLengthMeters);
+        if (osmData.elements.length === 0) {
+             resultsDiv.innerHTML += '<p>No map features (paths, roads) found in the Overpass response for this area.</p>';
+             alert("Map data received, but it contained no usable paths for this specific area.");
+             return;
+        }
+        resultsDiv.innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Processing data...</p>`;
+
+        // Start the processing and routing
+        processOsmData(osmData, coords.latitude, coords.longitude, desiredLengthMeters);
+
+    } catch (error) {
+         console.error(error);
+         alert(error.message);
+         resultsDiv.innerHTML += `<p>${error.message}. The Overpass API might be busy.</p>`;
+    }
+}
+
+async function lookupPostcodeCoords(postcode) {
+    const url = `${POSTCODES_IO_API_URL}${encodeURIComponent(postcode)}`;
+    console.log(`Looking up postcode: ${url}`);
+    try {
+        const response = await fetch(url);
         const data = await response.json();
-
         if (data.status === 200) {
-            const latitude = data.result.latitude;
-            const longitude = data.result.longitude;
-            console.log(`Coordinates found: Lat: ${latitude}, Lon: ${longitude}`);
-
-            // Center map and add marker
-            map.setView([latitude, longitude], 15); // Zoom in closer (level 15)
-            L.marker([latitude, longitude]).addTo(map)
-                .bindPopup(`Start: ${data.result.postcode}`)
-                .openPopup();
-
-            document.getElementById('results').innerHTML = `<p>Found location for ${data.result.postcode}. Next step: Fetch map data.</p>`;
-
-            // --- TODO: Call function to fetch Overpass data here --- 
-            fetchOsmData(latitude, longitude, length);
-
+            return {
+                latitude: data.result.latitude,
+                longitude: data.result.longitude,
+                postcode: data.result.postcode
+            };
         } else {
-            console.error("Postcode not found or invalid:", data.error);
-            alert(`Could not find coordinates for postcode: ${postcode}. Error: ${data.error}`);
-            document.getElementById('results').innerHTML = '<p>Postcode lookup failed.</p>';
+            throw new Error(data.error || 'Postcode not found');
         }
     } catch (error) {
         console.error("Error fetching postcode data:", error);
-        alert("An error occurred while looking up the postcode. Please check your connection and try again.");
-        document.getElementById('results').innerHTML = '<p>Error during postcode lookup.</p>';
+        throw new Error(`Postcode lookup failed: ${error.message}`);
     }
-
-    // Placeholder: Alert the user
-    // alert("Route finding not implemented yet."); // Remove or comment out this line
 }
 
-async function fetchOsmData(lat, lon, desiredLengthMeters) {
+async function fetchOsmDataNear(lat, lon, desiredLengthMeters) {
     console.log(`Fetching OSM data around ${lat}, ${lon} for length ${desiredLengthMeters}m`);
-    document.getElementById('results').innerHTML += '<p>Fetching walking paths data...</p>';
-
     const radius = Math.max(1000, (desiredLengthMeters / 2) + 500);
     console.log(`Using Overpass search radius: ${radius}m`);
 
@@ -110,10 +147,9 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
         >;
         out skel qt;
     `;
-    const overpassUrl = 'https://overpass-api.de/api/interpreter';
 
     try {
-        const response = await fetch(overpassUrl, {
+        const response = await fetch(OVERPASS_API_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded'
@@ -128,28 +164,16 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
         const osmData = await response.json();
         console.log("Received OSM data:", osmData);
 
-        // Add validation for osmData.elements before proceeding
-        if (osmData && Array.isArray(osmData.elements)) {
-            if (osmData.elements.length > 0) {
-                 document.getElementById('results').innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Next step: Process data and find routes.</p>`;
-                 processOsmData(osmData, lat, lon, parseInt(desiredLengthMeters)); 
-            } else {
-                 document.getElementById('results').innerHTML += '<p>No map features (paths, roads) found in the Overpass response for this area.</p>';
-                 alert("Map data received, but it contained no usable paths for this specific area.");
-            }
-        } else {
-            // Handle cases where Overpass returns something unexpected (e.g., error message, timeout structure)
-            console.error("Invalid or unexpected data structure received from Overpass API:", osmData);
-            document.getElementById('results').innerHTML += '<p>Error: Received invalid map data structure.</p>';
-            alert("Failed to process map data. Unexpected response from Overpass API.");
+        // Validate data structure
+        if (!osmData || !Array.isArray(osmData.elements)) {
+             console.error("Invalid or unexpected data structure received from Overpass API:", osmData);
+             throw new Error("Received invalid map data structure from Overpass API.");
         }
+        return osmData;
 
     } catch (error) {
-        // Log the full error object
         console.error("Error fetching or processing Overpass data (full error):", error);
-        document.getElementById('results').innerHTML += '<p>Error fetching walking path data.</p>';
-        // Use error.message but also log full error
-        alert(`An error occurred while fetching map data: ${error.message || 'Unknown error'}. Check console for details. The Overpass API might be busy.`);
+        throw new Error(`Fetching OSM data failed: ${error.message || 'Unknown error'}`);
     }
 }
 
@@ -157,7 +181,6 @@ async function fetchOsmData(lat, lon, desiredLengthMeters) {
 function _debugDrawGraph(graph, nodes, startLat, startLon) {
     console.log("Debugging: Drawing graph nodes and edges...");
     const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
-    const nearStartThresholdMeters = 50; // Define distance threshold
     const startPoint = turf.point([startLon, startLat]);
 
     // Use a FeatureGroup to add debug layers together for easier management/removal if needed
@@ -180,10 +203,10 @@ function _debugDrawGraph(graph, nodes, startLat, startLon) {
             try {
                 const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
                 const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
-                console.log(`Node ${nodeId} distance: ${distance.toFixed(1)}m`); // Temporary log
+                // console.log(`Node ${nodeId} distance: ${distance.toFixed(1)}m`); // Temporary log
 
-                if (distance <= nearStartThresholdMeters) {
-                    console.log(`Node ${nodeId} is NEAR start (${distance.toFixed(1)}m) - applying red style.`); // Temporary log
+                if (distance <= NEAR_START_THRESHOLD_METERS) {
+                    // console.log(`Node ${nodeId} is NEAR start (${distance.toFixed(1)}m) - applying red style.`); // Temporary log
                     markerOptions.color = '#ff0000'; // Red nodes near start
                     markerOptions.radius = 5;      // Make them slightly larger
                 }
@@ -221,46 +244,11 @@ function _debugDrawGraph(graph, nodes, startLat, startLon) {
      console.log(`Debugging: Drawn ${Object.keys(graph).length} nodes and ${drawnEdges.size} unique graph edges.`);
 }
 
-// Main function to process OSM data, build graph, and initiate search
-function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
-    console.log("Processing OSM data...");
-    document.getElementById('results').innerHTML += '<p>Processing map data...</p>';
+// --- Step 5: Map Data Processing & Graph Building ---
 
-    // Check if Turf.js is loaded
-    if (typeof turf === 'undefined') {
-        console.error("Turf.js library not found!");
-        alert("Error: Required geometry library (Turf.js) is missing.");
-        document.getElementById('results').innerHTML += '<p>Error: Missing geometry library.</p>';
-        return;
-    }
-
-    // Ensure these variables are declared at the function scope
-    const nodeUsage = {}; // Count how many ways use each node
-    const nodes = {};     // Store node coords { id: { lat: ..., lon: ... } }
-    const ways = [];      // Store way objects { id: ..., nodes: [...] }
-
-    // Check if osmData.elements exists before trying to iterate
-    if (!osmData || !osmData.elements) {
-        console.error("Invalid or missing osmData elements!");
-        document.getElementById('results').innerHTML += '<p>Error: Invalid osmData structure.</p>';
-        alert("Failed to process map data. Invalid osmData structure.");
-        return;
-    }
-
-    osmData.elements.forEach(element => {
-        if (element.type === 'node') {
-            nodes[element.id] = { lat: element.lat, lon: element.lon };
-        } else if (element.type === 'way' && element.nodes) {
-            ways.push({ id: element.id, nodes: element.nodes });
-            element.nodes.forEach(nodeId => {
-                nodeUsage[nodeId] = (nodeUsage[nodeId] || 0) + 1;
-            });
-        }
-    });
-
+function buildGraph(nodes, ways) {
+    console.log("Building graph from nodes and ways...");
     const graph = {}; // Adjacency list
-
-    // Wrap main processing loops in try...catch
     try {
         // Build graph by connecting consecutive nodes within ways
         ways.forEach(way => {
@@ -307,79 +295,115 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
                  console.warn("Skipping way with missing or invalid nodes property during edge building:", way);
             }
         });
+        const graphNodeCount = Object.keys(graph).length;
+        const graphEdgeCount = Object.values(graph).reduce((sum, edges) => sum + edges.length, 0) / 2; // Divided by 2 for undirected edges
+        console.log(`Graph built: ${graphNodeCount} nodes, ${graphEdgeCount} unique edges.`);
+        return graph;
 
     } catch (error) {
         console.error("Error during graph construction loops:", error);
-        document.getElementById('results').innerHTML += '<p>Error building path network graph.</p>';
-        alert(`Error processing map paths: ${error.message}`);
-        return; // Stop processing if graph building fails
-    }
-
-    const graphNodeCount = Object.keys(graph).length;
-    const graphEdgeCount = Object.values(graph).reduce((sum, edges) => sum + edges.length, 0) / 2;
-    console.log(`Graph built: ${graphNodeCount} nodes, ${graphEdgeCount} edges.`); // Log after building
-    document.getElementById('results').innerHTML += `<p>Network graph built (${graphNodeCount} nodes, ${graphEdgeCount} edges).</p>`;
-
-    if (graphNodeCount === 0) {
-         document.getElementById('results').innerHTML += '<p>Graph construction failed or area has no usable paths.</p>';
-         alert("Failed to build a searchable path network for this area.");
-         return;
-    }
-
-    // --- Find the closest graph node to the start point --- 
-    let startNodeId = null;
-    let minDistance = Infinity;
-    const startPoint = turf.point([startLon, startLat]);
-
-    Object.keys(graph).forEach(nodeId => {
-        const nodeData = nodes[nodeId];
-        if (nodeData) {
-            const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
-            const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
-            if (distance < minDistance) {
-                minDistance = distance;
-                startNodeId = parseInt(nodeId); // Ensure it's a number if keys were stringified
-            }
-        }
-    });
-
-    if (startNodeId !== null) {
-        console.log(`Found starting node: ${startNodeId}. Distance from postcode location: ${minDistance.toFixed(1)}m`); // Log the distance
-         document.getElementById('results').innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Closest node is ${minDistance.toFixed(1)}m away.</p>`; // Add distance info
-        
-        // --- Log Start Node Neighbors ---
-        console.log(`%cDEBUG: Neighbors of Start Node (${startNodeId}):`, 'background: #eee; color: black;');
-        console.log(graph[startNodeId] || 'No neighbors found in graph object!');
-        // --- End Log ---
-
-        // --- DEBUG: Visualize the graph --- 
-        // _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon // <<< COMMENTED OUT FOR DEBUGGING
-
-        console.log("Attempting to call findWalkRoutes..."); // Log before call
-        try {
-             findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon);
-             console.log("findWalkRoutes call apparently completed."); // Changed message slightly
-        } catch (error) {
-             // Log the full error object
-             console.error("Error occurred *during* findWalkRoutes call (full error):", error);
-             document.getElementById('results').innerHTML += `<p>Error during route finding process: ${error.message || 'Unknown error'}.</p>`;
-             alert(`Error during route search: ${error.message || 'Unknown error'}. Check console.`);
-        }
-        console.log("processOsmData finished execution."); // Add final log
-    } else {
-        console.error("Could not find a suitable starting node in the graph.");
-         document.getElementById('results').innerHTML += '<p>Error: Could not link postcode location to the path network.</p>';
-        alert("Could not find a starting point on the path network near the provided postcode.");
-        return;
+        throw new Error(`Error building path network graph: ${error.message}`);
     }
 }
 
-// --- Step 9: Implement Routing Algorithm --- 
-const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds max search time (Increased from 15s)
-const LENGTH_TOLERANCE_PERCENT = 0.20; // +/- 20% (Increased from 10%)
-const MAX_ROUTES_TO_FIND = 5;
+// Parses raw OSM data and finds the graph node nearest to the start coordinates.
+function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
+    console.log("Processing OSM data...");
+    const resultsDiv = document.getElementById('results'); // Get results div again or pass it?
 
-// Function to find the index to insert into a sorted array (by f score)
+    if (typeof turf === 'undefined') {
+        console.error("Turf.js library not found!");
+        alert("Error: Required geometry library (Turf.js) is missing.");
+        resultsDiv.innerHTML += '<p>Error: Missing geometry library.</p>';
+        return; // Should ideally throw an error
+    }
+
+    // --- 1. Parse OSM Data --- 
+    const nodes = {};     // Store node coords { id: { lat: ..., lon: ... } }
+    const ways = [];      // Store way objects { id: ..., nodes: [...] }
+    osmData.elements.forEach(element => {
+        if (element.type === 'node') {
+            nodes[element.id] = { lat: element.lat, lon: element.lon };
+        } else if (element.type === 'way' && element.nodes) {
+            ways.push({ id: element.id, nodes: element.nodes });
+            // We don't need nodeUsage anymore with the current graph build approach
+            // element.nodes.forEach(nodeId => {
+            //     nodeUsage[nodeId] = (nodeUsage[nodeId] || 0) + 1;
+            // });
+        }
+    });
+    console.log(`Parsed ${Object.keys(nodes).length} nodes and ${ways.length} ways.`);
+
+    // --- 2. Build Graph --- 
+    let graph;
+    try {
+        graph = buildGraph(nodes, ways);
+    } catch (error) {
+        console.error(error);
+        alert(error.message);
+        resultsDiv.innerHTML += `<p>${error.message}</p>`;
+        return;
+    }
+
+    const graphNodeCount = Object.keys(graph).length;
+    if (graphNodeCount === 0) {
+         resultsDiv.innerHTML += '<p>Graph construction failed or area has no usable paths.</p>';
+         alert("Failed to build a searchable path network for this area.");
+         return;
+    }
+    // Moved node/edge count log into buildGraph
+    resultsDiv.innerHTML += `<p>Network graph built (${graphNodeCount} nodes).</p>`;
+
+    // --- 3. Find Closest Start Node --- 
+    let startNodeId = null;
+    let minDistance = Infinity;
+    try {
+        const startPoint = turf.point([startLon, startLat]);
+        Object.keys(graph).forEach(nodeId => { // Only check nodes actually in the graph
+            const nodeData = nodes[nodeId]; // Get coords from original nodes object
+            if (nodeData) {
+                const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
+                const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    startNodeId = parseInt(nodeId);
+                }
+            }
+        });
+    } catch (error) {
+         console.error("Error finding closest start node:", error);
+         alert(`Error linking postcode to path network: ${error.message}`);
+         resultsDiv.innerHTML += '<p>Error linking postcode to path network.</p>';
+         return;
+    }
+
+    if (startNodeId !== null) {
+        console.log(`Found starting node: ${startNodeId}. Distance from postcode location: ${minDistance.toFixed(1)}m`);
+        resultsDiv.innerHTML += `<p>Found starting point in network (Node ID: ${startNodeId}). Closest node is ${minDistance.toFixed(1)}m away.</p>`;
+        
+        // --- DEBUG: Visualize the graph --- 
+        _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon
+
+        // --- 4. Initiate Route Finding --- 
+        console.log("Attempting to call findWalkRoutes...");
+        try {
+             findWalkRoutes(graph, startNodeId, desiredLengthMeters, nodes[startNodeId].lat, nodes[startNodeId].lon);
+             console.log("findWalkRoutes call apparently completed.");
+        } catch (error) {
+             console.error("Error occurred *during* findWalkRoutes call (full error):", error);
+             resultsDiv.innerHTML += `<p>Error during route finding process: ${error.message || 'Unknown error'}.</p>`;
+             alert(`Error during route search: ${error.message || 'Unknown error'}. Check console.`);
+        }
+        console.log("processOsmData finished execution.");
+    } else {
+        console.error("Could not find a suitable starting node in the graph.");
+        resultsDiv.innerHTML += '<p>Error: Could not link postcode location to the path network.</p>';
+        alert("Could not find a starting point on the path network near the provided postcode.");
+    }
+}
+
+// --- Step 6: Routing Algorithm ---
+// Note: findSortedIndex is a helper for findWalkRoutes
 function findSortedIndex(array, element) {
     let low = 0, high = array.length;
     while (low < high) {
@@ -393,7 +417,7 @@ function findSortedIndex(array, element) {
     return low;
 }
 
-// A* Search Implementation
+// A* Search Implementation (or Dijkstra's currently)
 async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startLon) {
     console.log(`Starting A* route search from node ${startNodeId} for target length ${targetLength}m`);
     console.log(`Received graph nodes: ${Object.keys(graph).length}, startNodeId: ${startNodeId}, targetLength: ${targetLength}, startLat: ${startLat}, startLon: ${startLon}`); // Log input parameters
@@ -409,12 +433,11 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
     const minLength = targetLength * (1 - LENGTH_TOLERANCE_PERCENT);
     const maxLength = targetLength * (1 + LENGTH_TOLERANCE_PERCENT);
     // We might relax the absolute max length slightly for A*
-    const absoluteMaxLength = targetLength * 10.0; // SIGNIFICANTLY INCREASED for debugging
+    const absoluteMaxLength = targetLength * ABSOLUTE_MAX_LENGTH_FACTOR; // Use constant factor
 
     // Maximum allowed straight-line distance from the start point (as a fraction of target length)
     // This is a key pruning parameter - adjust if needed
     // const MAX_DISTANCE_FACTOR = 0.75; // 75% of target length
-    const MAX_DISTANCE_FACTOR = 10.0; // Temporarily disable pruning by setting a very large factor
     const maxAllowedDistance = targetLength * MAX_DISTANCE_FACTOR;
     console.log(`Max allowed straight-line distance from start: ${maxAllowedDistance.toFixed(0)}m`);
 
@@ -459,21 +482,21 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
 
     while (openSet.length > 0) {
         iterations++;
-        console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Simple log
-        console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Log simplified openSet state
+        // console.log(`Iteration ${iterations} --- OpenSet Size: ${openSet.length}`); // Simple log
+        // console.log('OpenSet State BEFORE shift:', JSON.stringify(openSet.map(item => ({ id: item.nodeId, f: item.f.toFixed(1) })))); // Log simplified openSet state
 
         // Get node with the lowest f score (from the start of the sorted array)
         const current = openSet.shift(); 
-        console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Log shifted node
+        // console.log('--> Current node SHIFTED:', JSON.stringify({ id: current.nodeId, f: current.f.toFixed(1), g: current.g.toFixed(1) })); // Log shifted node
 
         const currentNodeId = current.nodeId;
         const currentG = current.g;
 
         // --- Debug Log: Check neighbors if current node is a neighbor of start ---
-        if (currentNodeId === 1178886671 || currentNodeId === 11405372363) { // Hardcoding IDs from previous log for NW1 4RY
-            console.log(`%cDEBUG: Processing node ${currentNodeId} (a direct neighbor of start node ${startNodeId})`, 'color: purple;');
-            console.log(`   Neighbors according to graph[${currentNodeId}]:`, graph[currentNodeId] || 'No neighbors listed!');
-        }
+        // if (currentNodeId === 1178886671 || currentNodeId === 11405372363) { // Hardcoding IDs from previous log for NW1 4RY
+        //     console.log(`%cDEBUG: Processing node ${currentNodeId} (a direct neighbor of start node ${startNodeId})`, 'color: purple;');
+        //     console.log(`   Neighbors according to graph[${currentNodeId}]:`, graph[currentNodeId] || 'No neighbors listed!');
+        // }
         // --- End Debug Log ---
 
         // DEBUG: Log current node
@@ -507,17 +530,17 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         // --- Goal Check --- 
         if (currentNodeId === startNodeId && current.path.length > 1) {
             // DETAILED LOGGING HERE:
-            console.log(`%cDEBUG: Goal Check - Reached start node ${startNodeId}.`, 'color: green; font-weight: bold;');
-            console.log(` -> Path Length (g): ${currentG.toFixed(1)}m`);
-            console.log(` -> Required Range: ${minLength.toFixed(1)}m - ${maxLength.toFixed(1)}m`);
-            console.log(` -> Path Node Count: ${current.path.length}`);
+            // console.log(`%cDEBUG: Goal Check - Reached start node ${startNodeId}.`, 'color: green; font-weight: bold;');
+            // console.log(` -> Path Length (g): ${currentG.toFixed(1)}m`);
+            // console.log(` -> Required Range: ${minLength.toFixed(1)}m - ${maxLength.toFixed(1)}m`);
+            // console.log(` -> Path Node Count: ${current.path.length}`);
             // console.log(` -> Path Nodes: ${current.path.join(' -> ')}`); // Potentially very long log
 
             // console.log(`DEBUG: Reached start node ${startNodeId} with length ${currentG.toFixed(0)}`); // Old log, replaced by detailed logs above
             if (currentG >= minLength && currentG <= maxLength) {
                 const route = { length: currentG, path: current.path, geometry: current.geometry };
                 foundRoutes.push(route);
-                console.log(`%cDEBUG: Goal Check - Length is ACCEPTABLE. Storing route.`, 'color: green;');
+                console.log(`%cDEBUG: Goal Check - Length is ACCEPTABLE. Storing route.`, 'color: green;'); // Keep this one?
                 // console.log(`A* Found route: Length ${currentG.toFixed(0)}m`); // Old log
                 document.getElementById('results').innerHTML += `<p>Found potential route: ${currentG.toFixed(0)}m</p>`;
                 if (foundRoutes.length >= MAX_ROUTES_TO_FIND) {
@@ -525,7 +548,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
                     break; // Exit main while loop
                 }
             } else {
-                 console.log(`%cDEBUG: Goal Check - Length is UNACCEPTABLE. Discarding path.`, 'color: orange;');
+                 // console.log(`%cDEBUG: Goal Check - Length is UNACCEPTABLE. Discarding path.`, 'color: orange;');
             }
              // Continue searching for other loops even if one is found
              // But don't explore neighbors from the start node once a loop is completed this way
@@ -544,9 +567,9 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
             console.log(`  --> Considering neighbor ${neighborId} (Edge Length: ${edgeLength.toFixed(0)}, Tentative gScore: ${tentativeGScore.toFixed(0)})`); // Log neighbor consideration
 
             // Specific check if neighbor is the start node
-            if (neighborId === startNodeId) {
-                 console.log(`%c      Neighbor IS the start node (${startNodeId})! Current path length: ${current.path.length}`, 'color: blue; font-style: italic;');
-            }
+            // if (neighborId === startNodeId) {
+            //      console.log(`%c      Neighbor IS the start node (${startNodeId})! Current path length: ${current.path.length}`, 'color: blue; font-style: italic;');
+            // }
 
             // Pruning based on path length
             if (tentativeGScore > absoluteMaxLength) {
@@ -626,6 +649,8 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
     }
 }
 
+// --- Step 7: Map Utilities ---
+
 // Function to clear existing routes from the map
 function clearRoutes() {
     drawnRouteLayers.forEach(layer => map.removeLayer(layer));
@@ -634,7 +659,7 @@ function clearRoutes() {
     // document.getElementById('results').innerHTML = '<h2>Results</h2>';
 }
 
-// Implement the drawRoute function
+// Implement the drawRoute function to display a found route
 function drawRoute(route, index) {
     if (!route || !route.geometry || route.geometry.length === 0) {
         console.error("Invalid route data for drawing:", route);
@@ -678,4 +703,73 @@ function drawRoute(route, index) {
     } else {
         console.warn(`Route ${index + 1} has insufficient coordinates to draw.`);
     }
-} 
+}
+
+// Function to draw the constructed graph for debugging
+function _debugDrawGraph(graph, nodes, startLat, startLon) {
+    console.log("Debugging: Drawing graph nodes and edges...");
+    const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
+    const startPoint = turf.point([startLon, startLat]);
+
+    // Use a FeatureGroup to add debug layers together for easier management/removal if needed
+    const debugLayerGroup = L.featureGroup().addTo(map);
+    // Debug layers should NOT be added to drawnRouteLayers, only to their own group
+
+    Object.keys(graph).forEach(nodeIdStr => {
+        const nodeId = parseInt(nodeIdStr);
+        const nodeData = nodes[nodeId];
+
+        // Draw node marker
+        if (nodeData) {
+            let markerOptions = {
+                radius: 3,
+                color: '#ff00ff', // Default: Magenta nodes
+                fillOpacity: 0.8
+            };
+
+            // Check distance from start
+            try {
+                const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
+                const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
+                // console.log(`Node ${nodeId} distance: ${distance.toFixed(1)}m`); // Temporary log
+
+                if (distance <= NEAR_START_THRESHOLD_METERS) {
+                    // console.log(`Node ${nodeId} is NEAR start (${distance.toFixed(1)}m) - applying red style.`); // Temporary log
+                    markerOptions.color = '#ff0000'; // Red nodes near start
+                    markerOptions.radius = 5;      // Make them slightly larger
+                }
+            } catch(e) {
+                console.warn(`Turf error calculating distance for node ${nodeId}:`, e);
+            }
+
+            const marker = L.circleMarker([nodeData.lat, nodeData.lon], markerOptions);
+            marker.bindPopup(`Node: ${nodeId}`);
+            debugLayerGroup.addLayer(marker); // Add to group
+        }
+
+        // Draw edges originating from this node
+        const edges = graph[nodeId] || [];
+        edges.forEach(edge => {
+            const neighborId = edge.neighborId;
+            const edgeKey = [nodeId, neighborId].sort((a, b) => a - b).join('-');
+
+            if (!drawnEdges.has(edgeKey)) {
+                 if (edge.geometry && edge.geometry.length >= 2) {
+                    const leafletCoords = edge.geometry.map(coord => [coord[1], coord[0]]); // lon,lat -> lat,lon
+                    const polyline = L.polyline(leafletCoords, {
+                        color: '#00ffff', // Cyan edges
+                        weight: 1,
+                        opacity: 0.6
+                    });
+                    debugLayerGroup.addLayer(polyline); // Add to group
+                    drawnEdges.add(edgeKey);
+                 } else {
+                     console.warn(`Edge ${edgeKey} has invalid geometry:`, edge.geometry);
+                 }
+            }
+        });
+    });
+     console.log(`Debugging: Drawn ${Object.keys(graph).length} nodes and ${drawnEdges.size} unique graph edges.`);
+}
+
+// --- End of File --- 
