@@ -492,21 +492,23 @@ function processOsmData(osmData, startLat, startLon, endLat, endLon) {
 
         Object.keys(graph).forEach(nodeId => {
             const nodeData = nodes[nodeId];
-            if (nodeData) {
-                const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
-                // Check distance to start
-                const distToStart = turf.distance(startPoint, nodePoint, { units: 'meters' });
-                if (distToStart < minStartDistance) {
-                    minStartDistance = distToStart;
-                    startNodeId = parseInt(nodeId);
-                    startNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
+            // Add check for valid nodeData and numeric coordinates
+            if (nodeData && typeof nodeData.lat === 'number' && typeof nodeData.lon === 'number') {
+                try { // Wrap Turf calls in separate try-catch for safety
+                    const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
+                    const distToStart = turf.distance(startPoint, nodePoint, { units: 'meters' });
+                    if (distToStart < minStartDistance) {
+                        minStartDistance = distToStart;
+                        startNodeId = parseInt(nodeId);
+                        startNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
+                    }
+                } catch (turfError) {
+                     console.warn(`Turf.js error processing node ${nodeId} - skipping node.`, turfError);
                 }
-                // Check distance to end
-                const distToEnd = turf.distance(endPoint, nodePoint, { units: 'meters' });
-                if (distToEnd < minEndDistance) {
-                    minEndDistance = distToEnd;
-                    endNodeId = parseInt(nodeId);
-                    endNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
+            } else {
+                // Log nodes with missing/invalid data if needed for debugging
+                if (nodeId !== undefined) { // Avoid logging if nodeId itself is bad
+                     console.warn(`Skipping node ${nodeId} due to missing or non-numeric lat/lon:`, nodeData);
                 }
             }
         });
