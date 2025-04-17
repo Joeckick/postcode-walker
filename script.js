@@ -6,7 +6,7 @@ const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds
 const MAX_ROUTES_TO_FIND = 1; // Find only the shortest
 // const ABSOLUTE_MAX_LENGTH_FACTOR = 3.0; // Factor for pruning paths much longer than target (Removed - no length pruning)
 // const MAX_DISTANCE_FACTOR = 10.0; // Factor for distance-based pruning (Removed - no distance pruning)
-const NEAR_START_THRESHOLD_METERS = 50; // For debug graph visualization
+// const NEAR_START_THRESHOLD_METERS = 50; // For debug graph visualization (COMMENTED OUT)
 
 console.log("Script loaded.");
 
@@ -45,18 +45,23 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error("Find routes button not found!");
     }
 
-    // *** NEW DEBUG: Check if the element exists *after* DOM load and listener attachment ***
-    const initialEndElement = document.getElementById('end_postcode_input');
-    console.log("DEBUG (DOMContentLoaded): Element with ID 'end_postcode_input':", initialEndElement);
+    // *** COMMENTED OUT DEBUG log for element check on load ***
+    // const initialEndElement = document.getElementById('end_postcode_input');
+    // console.log("DEBUG (DOMContentLoaded): Element with ID 'end_postcode_input':", initialEndElement);
 
 });
 
 async function findRoutes() {
     console.log("Find routes button clicked!");
     const startPostcode = document.getElementById('postcode').value.trim();
-    // *** DEBUG: Check if the element is found right before accessing its value ***
+    // *** COMMENTED OUT DEBUG log for element check on click ***
     const endPostcodeElement = document.getElementById('end_postcode_input');
-    console.log("DEBUG (findRoutes): Element with ID 'end_postcode_input':", endPostcodeElement);
+    // console.log("DEBUG (findRoutes): Element with ID 'end_postcode_input':", endPostcodeElement); // Removed debug log
+    if (!endPostcodeElement) { // Add a check here just in case
+        console.error("Could not find the end postcode input element!");
+        alert("Error: Could not find the end postcode input element.");
+        return;
+    }
     const endPostcode = endPostcodeElement.value.trim(); // Get end postcode using correct ID
     // const desiredLengthMeters = parseInt(lengthInput); // Removed length input
 
@@ -87,7 +92,7 @@ async function findRoutes() {
         resultsDiv.innerHTML = `<p>Found locations for ${startCoords.postcode} and ${endCoords.postcode}. Fetching map data...</p>`;
 
         // Clear previous map markers/routes if necessary (clearRoutes might need adjustment)
-        clearRoutes(); 
+        clearRoutes();
 
         // Center map roughly between start and end? Or just on start?
         // Let's fit bounds later after finding the route.
@@ -105,13 +110,13 @@ async function findRoutes() {
         return;
     }
 
-    // Fetch OSM Data - Use a bounding box or just radius around start? 
+    // Fetch OSM Data - Use a bounding box or just radius around start?
     // For now, keep radius around start, but make it larger or dependent on distance?
     // Let's use a fixed large radius for simplicity first.
-    const fetchRadius = 5000; // Increased fixed radius (e.g., 5km) for point-to-point
+    const fetchRadius = 5000; // Use a fixed radius around the start point
     try {
-        // Pass start coords for fetching, but end coords for processing
-        const osmData = await fetchOsmDataNear(startCoords.latitude, startCoords.longitude, fetchRadius); 
+        // Pass only start coords for fetching
+        const osmData = await fetchOsmDataNear(startCoords.latitude, startCoords.longitude, fetchRadius);
         if (osmData.elements.length === 0) {
              resultsDiv.innerHTML += '<p>No map features (paths, roads) found in the Overpass response for this area.</p>';
              alert("Map data received, but it contained no usable paths for this specific area.");
@@ -119,7 +124,7 @@ async function findRoutes() {
         }
         resultsDiv.innerHTML += `<p>Successfully fetched ${osmData.elements.length} map elements. Processing data...</p>`;
 
-        // Start the processing and routing - pass end coords
+        // Start the processing and routing - pass both start and end coords
         processOsmData(osmData, startCoords.latitude, startCoords.longitude, endCoords.latitude, endCoords.longitude);
 
     } catch (error) {
@@ -150,10 +155,9 @@ async function lookupPostcodeCoords(postcode) {
     }
 }
 
-async function fetchOsmDataNear(lat, lon, desiredLengthMeters) {
-    console.log(`Fetching OSM data around ${lat}, ${lon} for length ${desiredLengthMeters}m`);
-    const radius = Math.max(1000, (desiredLengthMeters / 2) + 500);
-    console.log(`Using Overpass search radius: ${radius}m`);
+async function fetchOsmDataNear(lat, lon, radius) { // Simplified parameters
+    console.log(`Fetching OSM data around ${lat}, ${lon} with radius ${radius}m`);
+    // Removed radius calculation based on length
 
     const query = `
         [out:json][timeout:30];
@@ -183,7 +187,6 @@ async function fetchOsmDataNear(lat, lon, desiredLengthMeters) {
         const osmData = await response.json();
         console.log("Received OSM data:", osmData);
 
-        // Validate data structure
         if (!osmData || !Array.isArray(osmData.elements)) {
              console.error("Invalid or unexpected data structure received from Overpass API:", osmData);
              throw new Error("Received invalid map data structure from Overpass API.");
@@ -196,72 +199,14 @@ async function fetchOsmDataNear(lat, lon, desiredLengthMeters) {
     }
 }
 
-// Function to draw the constructed graph for debugging
-function _debugDrawGraph(graph, nodes, startLat, startLon) {
-    console.log("Debugging: Drawing graph nodes and edges...");
-    const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
-    const startPoint = turf.point([startLon, startLat]);
-
-    // Use a FeatureGroup to add debug layers together for easier management/removal if needed
-    const debugLayerGroup = L.featureGroup().addTo(map);
-    // Debug layers should NOT be added to drawnRouteLayers, only to their own group
-
-    Object.keys(graph).forEach(nodeIdStr => {
-        const nodeId = parseInt(nodeIdStr);
-        const nodeData = nodes[nodeId];
-
-        // Draw node marker
-        if (nodeData) {
-            let markerOptions = {
-                radius: 3,
-                color: '#ff00ff', // Default: Magenta nodes
-                fillOpacity: 0.8
-            };
-
-            // Check distance from start
-            try {
-                const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
-                const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
-                // console.log(`Node ${nodeId} distance: ${distance.toFixed(1)}m`); // Temporary log
-
-                if (distance <= NEAR_START_THRESHOLD_METERS) {
-                    // console.log(`Node ${nodeId} is NEAR start (${distance.toFixed(1)}m) - applying red style.`); // Temporary log
-                    markerOptions.color = '#ff0000'; // Red nodes near start
-                    markerOptions.radius = 5;      // Make them slightly larger
-                }
-            } catch(e) {
-                console.warn(`Turf error calculating distance for node ${nodeId}:`, e);
-            }
-
-            const marker = L.circleMarker([nodeData.lat, nodeData.lon], markerOptions);
-            marker.bindPopup(`Node: ${nodeId}`);
-            debugLayerGroup.addLayer(marker); // Add to group
-        }
-
-        // Draw edges originating from this node
-        const edges = graph[nodeId] || [];
-        edges.forEach(edge => {
-            const neighborId = edge.neighborId;
-            const edgeKey = [nodeId, neighborId].sort((a, b) => a - b).join('-');
-
-            if (!drawnEdges.has(edgeKey)) {
-                 if (edge.geometry && edge.geometry.length >= 2) {
-                    const leafletCoords = edge.geometry.map(coord => [coord[1], coord[0]]); // lon,lat -> lat,lon
-                    const polyline = L.polyline(leafletCoords, {
-                        color: '#00ffff', // Cyan edges
-                        weight: 1,
-                        opacity: 0.6
-                    });
-                    debugLayerGroup.addLayer(polyline); // Add to group
-                    drawnEdges.add(edgeKey);
-                 } else {
-                     console.warn(`Edge ${edgeKey} has invalid geometry:`, edge.geometry);
-                 }
-            }
-        });
-    });
-     console.log(`Debugging: Drawn ${Object.keys(graph).length} nodes and ${drawnEdges.size} unique graph edges.`);
-}
+// *** COMMENTED OUT _debugDrawGraph function ***
+// function _debugDrawGraph(graph, nodes, startLat, startLon) {
+//     console.log("Debugging: Drawing graph nodes and edges...");
+//     const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
+//     const startPoint = turf.point([startLon, startLat]);
+//     ...
+//     console.log(`Debugging: Drawn ${Object.keys(graph).length} nodes and ${drawnEdges.size} unique graph edges.`);
+// }
 
 // --- Step 5: Map Data Processing & Graph Building ---
 
@@ -423,8 +368,8 @@ function processOsmData(osmData, startLat, startLon, endLat, endLon) {
     console.log(`Found end node: ${endNodeId}. Distance: ${minEndDistance.toFixed(1)}m`);
     resultsDiv.innerHTML += `<p>Found network points: Start Node ${startNodeId} (${minStartDistance.toFixed(1)}m away), End Node ${endNodeId} (${minEndDistance.toFixed(1)}m away).</p>`;
     
-    // --- DEBUG: Visualize the graph (Optional: could highlight start/end nodes differently) ---
-    _debugDrawGraph(graph, nodes, startLat, startLon); // Keep debugging based on start?
+    // *** COMMENTED OUT call to _debugDrawGraph ***
+    // _debugDrawGraph(graph, nodes, startLat, startLon);
 
     // --- 4. Initiate Route Finding --- 
     console.log("Attempting to call findWalkRoutes...");
@@ -677,71 +622,12 @@ function drawRoute(route, index) {
     }
 }
 
-// Function to draw the constructed graph for debugging
-function _debugDrawGraph(graph, nodes, startLat, startLon) {
-    console.log("Debugging: Drawing graph nodes and edges...");
-    const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
-    const startPoint = turf.point([startLon, startLat]);
-
-    // Use a FeatureGroup to add debug layers together for easier management/removal if needed
-    const debugLayerGroup = L.featureGroup().addTo(map);
-    // Debug layers should NOT be added to drawnRouteLayers, only to their own group
-
-    Object.keys(graph).forEach(nodeIdStr => {
-        const nodeId = parseInt(nodeIdStr);
-        const nodeData = nodes[nodeId];
-
-        // Draw node marker
-        if (nodeData) {
-            let markerOptions = {
-                radius: 3,
-                color: '#ff00ff', // Default: Magenta nodes
-                fillOpacity: 0.8
-            };
-
-            // Check distance from start
-            try {
-                const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
-                const distance = turf.distance(startPoint, nodePoint, { units: 'meters' });
-                // console.log(`Node ${nodeId} distance: ${distance.toFixed(1)}m`); // Temporary log
-
-                if (distance <= NEAR_START_THRESHOLD_METERS) {
-                    // console.log(`Node ${nodeId} is NEAR start (${distance.toFixed(1)}m) - applying red style.`); // Temporary log
-                    markerOptions.color = '#ff0000'; // Red nodes near start
-                    markerOptions.radius = 5;      // Make them slightly larger
-                }
-            } catch(e) {
-                console.warn(`Turf error calculating distance for node ${nodeId}:`, e);
-            }
-
-            const marker = L.circleMarker([nodeData.lat, nodeData.lon], markerOptions);
-            marker.bindPopup(`Node: ${nodeId}`);
-            debugLayerGroup.addLayer(marker); // Add to group
-        }
-
-        // Draw edges originating from this node
-        const edges = graph[nodeId] || [];
-        edges.forEach(edge => {
-            const neighborId = edge.neighborId;
-            const edgeKey = [nodeId, neighborId].sort((a, b) => a - b).join('-');
-
-            if (!drawnEdges.has(edgeKey)) {
-                 if (edge.geometry && edge.geometry.length >= 2) {
-                    const leafletCoords = edge.geometry.map(coord => [coord[1], coord[0]]); // lon,lat -> lat,lon
-                    const polyline = L.polyline(leafletCoords, {
-                        color: '#00ffff', // Cyan edges
-                        weight: 1,
-                        opacity: 0.6
-                    });
-                    debugLayerGroup.addLayer(polyline); // Add to group
-                    drawnEdges.add(edgeKey);
-                 } else {
-                     console.warn(`Edge ${edgeKey} has invalid geometry:`, edge.geometry);
-                 }
-            }
-        });
-    });
-     console.log(`Debugging: Drawn ${Object.keys(graph).length} nodes and ${drawnEdges.size} unique graph edges.`);
-}
+// *** COMMENTED OUT second _debugDrawGraph function definition ***
+// function _debugDrawGraph(graph, nodes, startLat, startLon) {
+//     console.log("Debugging: Drawing graph nodes and edges...");
+//     const drawnEdges = new Set(); // Keep track of edges drawn (node1-node2)
+//     ...
+//      console.log(`Debugging: Drawn ${Object.keys(graph).length} nodes and ${drawnEdges.size} unique graph edges.`);
+// }
 
 // --- End of File --- 
