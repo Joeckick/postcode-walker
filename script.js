@@ -36,21 +36,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("Map initialized");
 
-    // Add event listener for the button (functionality to be added later)
+    // Add event listener for the button
     const findButton = document.getElementById('find-routes-btn');
     if (findButton) {
         findButton.addEventListener('click', findRoutes);
+        console.log("Attached click listener to find-routes-btn");
     } else {
         console.error("Find routes button not found!");
     }
+
+    // *** NEW DEBUG: Check if the element exists *after* DOM load and listener attachment ***
+    const initialEndElement = document.getElementById('end_postcode_input');
+    console.log("DEBUG (DOMContentLoaded): Element with ID 'end_postcode_input':", initialEndElement);
 
 });
 
 async function findRoutes() {
     console.log("Find routes button clicked!");
     const startPostcode = document.getElementById('postcode').value.trim();
+    // *** DEBUG: Check if the element is found right before accessing its value ***
     const endPostcodeElement = document.getElementById('end_postcode_input');
-    console.log("DEBUG: Element with ID 'end_postcode_input':", endPostcodeElement);
+    console.log("DEBUG (findRoutes): Element with ID 'end_postcode_input':", endPostcodeElement);
     const endPostcode = endPostcodeElement.value.trim(); // Get end postcode using correct ID
     // const desiredLengthMeters = parseInt(lengthInput); // Removed length input
 
