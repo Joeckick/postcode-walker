@@ -268,8 +268,24 @@ function buildGraph(nodes, ways) {
 
                             // Check for zero length edges which can cause issues
                             if (length > 0) {
-                                graph[node1Id].push({ neighborId: node2Id, length: length, geometry: segmentGeometry });
-                                graph[node2Id].push({ neighborId: node1Id, length: length, geometry: segmentGeometry.slice().reverse() });
+                                // Get way name (use ref if name is not available)
+                                const wayName = way.tags?.name || way.tags?.ref || `Way ${way.id}`; 
+                                
+                                // Add edge with way info
+                                graph[node1Id].push({ 
+                                    neighborId: node2Id, 
+                                    length: length, 
+                                    geometry: segmentGeometry, 
+                                    wayId: way.id, 
+                                    wayName: wayName 
+                                });
+                                graph[node2Id].push({ 
+                                    neighborId: node1Id, 
+                                    length: length, 
+                                    geometry: segmentGeometry.slice().reverse(), 
+                                    wayId: way.id, 
+                                    wayName: wayName 
+                                });
                             } else {
                                 console.warn(`Skipping zero-length edge between ${node1Id} and ${node2Id}`);
                             }
@@ -315,7 +331,8 @@ function processOsmData(osmData, startLat, startLon, endLat, endLon) {
         if (element.type === 'node') {
             nodes[element.id] = { lat: element.lat, lon: element.lon };
         } else if (element.type === 'way' && element.nodes) {
-            ways.push({ id: element.id, nodes: element.nodes });
+            // Store the way ID, node list, and tags
+            ways.push({ id: element.id, nodes: element.nodes, tags: element.tags || {} }); 
             // We don't need nodeUsage anymore with the current graph build approach
             // element.nodes.forEach(nodeId => {
             //     nodeUsage[nodeId] = (nodeUsage[nodeId] || 0) + 1;
@@ -470,7 +487,7 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
             f: initialHeuristic, // f = g (0) + h
             g: 0, 
             path: [startNodeId], 
-            geometry: [] 
+            segments: [] // Initialize segments array
         });
     } catch (error) {
         console.error("Error during A* initialization (full error):", error);
@@ -504,7 +521,8 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
         if (currentNodeId === endNodeId) {
             console.log(`%cDEBUG: Goal Check - Reached END node ${endNodeId}!`, 'color: green; font-weight: bold;');
             console.log(` -> Path Length (g): ${currentG.toFixed(1)}m`);
-            const route = { length: currentG, path: current.path, geometry: current.geometry };
+            // Include segments in the final route object
+            const route = { length: currentG, path: current.path, segments: current.segments }; 
             foundRoutes.push(route);
             console.log(`%cDEBUG: Found shortest route. Length: ${currentG.toFixed(1)}m. Storing route.`, 'color: green;');
             break; // Found the shortest path, exit loop
@@ -516,6 +534,8 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
             const neighborId = edge.neighborId;
             const edgeLength = edge.length;
             const edgeGeometry = edge.geometry;
+            const edgeWayId = edge.wayId; // Get way info from edge
+            const edgeWayName = edge.wayName; // Get way info from edge
             const tentativeGScore = currentG + edgeLength;
 
             // --- REMOVE absolute path length pruning ---
@@ -544,11 +564,22 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
                 const f = tentativeGScore + h; // f = g + h
 
                 const newPath = [...current.path, neighborId];
-                const newGeometry = [...current.geometry, edgeGeometry];
+                // const newGeometry = [...current.geometry, edgeGeometry]; // Replaced by segments
+                // Add new segment details to the list
+                const newSegment = { 
+                    geometry: edgeGeometry, 
+                    length: edgeLength, 
+                    wayId: edgeWayId, 
+                    wayName: edgeWayName 
+                };
+                const newSegments = [...current.segments, newSegment];
+                
                 const newState = {
                     nodeId: neighborId,
                     f: f, g: tentativeGScore,
-                    path: newPath, geometry: newGeometry
+                    path: newPath, 
+                    // geometry: newGeometry, // Replaced by segments
+                    segments: newSegments // Store the updated segments list
                 };
                 const index = findSortedIndex(openSet, newState);
                 openSet.splice(index, 0, newState);
@@ -572,13 +603,19 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
     if (foundRoutes.length > 0) {
         const shortestRoute = foundRoutes[0]; // Should only be one
         document.getElementById('results').innerHTML += `<h3>Found Route:</h3><ul>`;
-        console.log(`Shortest Route: Length=${shortestRoute.length.toFixed(0)}m, Nodes=${shortestRoute.path.length}`);
+        console.log(`Shortest Route: Length=${shortestRoute.length.toFixed(0)}m, Nodes=${shortestRoute.path.length}, Segments=${shortestRoute.segments.length}`); // Log segment count
         document.getElementById('results').innerHTML += `<li>Route Length: ${shortestRoute.length.toFixed(0)}m</li>`;
         drawRoute(shortestRoute, 0); // Draw the single route
         document.getElementById('results').innerHTML += `</ul>`;
+        
+        // Generate and display instructions
+        const instructionsHtml = generateInstructions(shortestRoute.segments);
+        document.getElementById('results').innerHTML += instructionsHtml;
+
         // Fit map to the route bounds
         try {
-            const routeLine = L.polyline(shortestRoute.geometry.map(seg => seg.map(coord => [coord[1], coord[0]])).flat());
+            // Update to use route.segments for geometry
+            const routeLine = L.polyline(shortestRoute.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
             if (routeLine.getLatLngs().length > 0) {
                  map.fitBounds(routeLine.getBounds());
             }
@@ -589,6 +626,51 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
     } else {
         document.getElementById('results').innerHTML += `<p>Could not find a route between the start and end points.</p>`;
         alert("Could not find a route. The points may not be connected on the path network, or the search timed out.");
+    }
+}
+
+// --- Step 8: Instruction Generation ---
+
+function generateInstructions(routeSegments) {
+    if (!routeSegments || routeSegments.length === 0) {
+        return "<p>No route segments found to generate instructions.</p>";
+    }
+
+    let instructions = [];
+    let currentInstruction = null;
+
+    routeSegments.forEach((segment, index) => {
+        const wayName = segment.wayName || "Unnamed path";
+        const distance = segment.length;
+
+        if (!currentInstruction) {
+            // Start of the route
+            currentInstruction = { wayName: wayName, distance: distance };
+        } else if (wayName === currentInstruction.wayName) {
+            // Continue on the same way
+            currentInstruction.distance += distance;
+        } else {
+            // Changed way - finalize previous instruction and start new one
+            instructions.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+            currentInstruction = { wayName: wayName, distance: distance };
+        }
+
+        // Add the last instruction if it exists
+        if (index === routeSegments.length - 1 && currentInstruction) {
+             instructions.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+        }
+    });
+
+    if (instructions.length === 0 && currentInstruction) {
+        // Handle cases where the entire route is on a single way
+        instructions.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+    }
+
+    // Format as an HTML list
+    if (instructions.length > 0) {
+        return "<h3>Instructions:</h3><ol><li>" + instructions.join("</li><li>") + "</li></ol>";
+    } else {
+        return "<p>Could not generate instructions from route segments.</p>";
     }
 }
 
@@ -604,23 +686,33 @@ function clearRoutes() {
 
 // Implement the drawRoute function to display a found route
 function drawRoute(route, index) {
-    if (!route || !route.geometry || route.geometry.length === 0) {
+    // Check for route.segments
+    if (!route || !route.segments || route.segments.length === 0) { 
         console.error("Invalid route data for drawing:", route);
         return;
     }
 
-    // Combine geometry segments into a single coordinate array
-    // Segments are [[lon, lat], [lon, lat], ...]
+    // Combine segments' geometry into a single coordinate array
     let fullCoords = [];
-    route.geometry.forEach((segment, segmentIndex) => {
-        // First segment: add all points
-        // Subsequent segments: skip the first point (it's the same as the last point of the previous segment)
-        const pointsToAdd = segmentIndex === 0 ? segment : segment.slice(1);
-        fullCoords = fullCoords.concat(pointsToAdd);
+    route.segments.forEach((segment, segmentIndex) => {
+        // First segment: add all points from its geometry
+        // Subsequent segments: skip the first point of its geometry
+        const pointsToAdd = segmentIndex === 0 ? segment.geometry : segment.geometry.slice(1);
+        if (pointsToAdd) {
+            fullCoords = fullCoords.concat(pointsToAdd);
+        }
     });
 
     // Convert to Leaflet's [lat, lon] format
-    const leafletCoords = fullCoords.map(coord => [coord[1], coord[0]]);
+    const leafletCoords = fullCoords.map(coord => {
+        // Add check for valid coordinate structure
+        if (Array.isArray(coord) && coord.length === 2) {
+            return [coord[1], coord[0]]; 
+        } else {
+            console.warn("Skipping invalid coordinate pair during drawing:", coord);
+            return null; // Filter out invalid coords later
+        }
+    }).filter(coord => coord !== null); // Remove any nulls from invalid pairs
 
     if (leafletCoords.length >= 2) {
         // Define route colors (add more if needed)
