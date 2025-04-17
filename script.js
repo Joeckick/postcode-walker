@@ -431,9 +431,15 @@ function buildGraph(nodes, ways) {
 }
 
 // Parses raw OSM data and finds the graph node nearest to the start coordinates.
-function processOsmData(osmData, startLat, startLon, endLat, endLon) {
+function processOsmData(osmData, startLat, startLon) {
     console.log("Processing OSM data...");
     const resultsDiv = document.getElementById('results');
+
+    // Validate start coordinates FIRST
+    if (typeof startLat !== 'number' || typeof startLon !== 'number') {
+        console.error("Invalid start coordinates received:", { startLat, startLon });
+        throw new Error("Invalid start coordinates provided for processing.");
+    }
 
     if (typeof turf === 'undefined') {
         console.error("Turf.js library not found!");
@@ -480,15 +486,11 @@ function processOsmData(osmData, startLat, startLon, endLat, endLon) {
 
     // --- 3. Find Closest Start and End Nodes --- 
     let startNodeId = null;
-    let endNodeId = null;
     let minStartDistance = Infinity;
-    let minEndDistance = Infinity;
     let startNodeActualCoords = null;
-    let endNodeActualCoords = null; // Store actual coords of the found nodes
 
     try {
         const startPoint = turf.point([startLon, startLat]);
-        const endPoint = turf.point([endLon, endLat]);
 
         Object.keys(graph).forEach(nodeId => {
             const nodeData = nodes[nodeId];
@@ -519,17 +521,15 @@ function processOsmData(osmData, startLat, startLon, endLat, endLon) {
          return;
     }
 
-    if (startNodeId === null || endNodeId === null) {
-         const missing = startNodeId === null ? "start" : "end";
-         console.error(`Could not find a suitable ${missing} node in the graph.`);
-         resultsDiv.innerHTML += `<p>Error: Could not link ${missing} postcode location to the path network.</p>`;
-         alert(`Could not find a starting/ending point on the path network near the provided ${missing} postcode.`);
+    if (startNodeId === null) {
+         console.error(`Could not find a suitable start node in the graph.`);
+         resultsDiv.innerHTML += `<p>Error: Could not link start postcode location to the path network.</p>`;
+         alert(`Could not find a starting point on the path network near the provided start postcode.`);
          return;
     }
     
     console.log(`Found start node: ${startNodeId}. Distance: ${minStartDistance.toFixed(1)}m`);
-    console.log(`Found end node: ${endNodeId}. Distance: ${minEndDistance.toFixed(1)}m`);
-    resultsDiv.innerHTML += `<p>Found network points: Start Node ${startNodeId} (${minStartDistance.toFixed(1)}m away), End Node ${endNodeId} (${minEndDistance.toFixed(1)}m away).</p>`;
+    resultsDiv.innerHTML += `<p>Found network points: Start Node ${startNodeId} (${minStartDistance.toFixed(1)}m away).</p>`;
     
     // *** COMMENTED OUT call to _debugDrawGraph ***
     // _debugDrawGraph(graph, nodes, startLat, startLon);
@@ -537,9 +537,9 @@ function processOsmData(osmData, startLat, startLon, endLat, endLon) {
     // --- 4. Initiate Route Finding --- 
     console.log("Attempting to call findWalkRoutes...");
     try {
-        // Pass startNodeId, endNodeId, and actual coordinates of endNode for heuristic
+        // Pass startNodeId, and actual coordinates of startNode for heuristic
         // *** Also pass the nodes object for heuristic calculations inside A* ***
-        findWalkRoutes(graph, nodes, startNodeId, endNodeId, endNodeActualCoords.lat, endNodeActualCoords.lon);
+        findWalkRoutes(graph, nodes, startNodeId, startNodeActualCoords.lat, startNodeActualCoords.lon);
         console.log("findWalkRoutes call apparently completed.");
     } catch (error) {
         console.error("Error occurred *during* findWalkRoutes call (full error):", error);
@@ -565,13 +565,13 @@ function findSortedIndex(array, element) {
 }
 
 // A* Search Implementation for Point-to-Point
-async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endLon) { // Added nodes parameter
-    console.log(`Starting A* route search from node ${startNodeId} to node ${endNodeId}`);
+async function findWalkRoutes(graph, nodes, startNodeId, endLat, endLon) { // Added endLat, endLon
+    console.log(`Starting A* route search from node ${startNodeId} to end point (${endLat}, ${endLon})`);
     // Removed targetLength, startLat, startLon from params/logs
-    console.log(`Received graph nodes: ${Object.keys(graph).length}, node data entries: ${Object.keys(nodes).length}, startNodeId: ${startNodeId}, endNodeId: ${endNodeId}`); // Log nodes count
+    console.log(`Received graph nodes: ${Object.keys(graph).length}, node data entries: ${Object.keys(nodes).length}, startNodeId: ${startNodeId}`); // Log nodes count
     
     // Updated parameter check
-    if (!graph || Object.keys(graph).length === 0 || !nodes || Object.keys(nodes).length === 0 || !startNodeId || !endNodeId || !endLat || !endLon) { // Check nodes
+    if (!graph || Object.keys(graph).length === 0 || !nodes || Object.keys(nodes).length === 0 || !startNodeId || !endLat || !endLon) { // Check nodes
         console.error("findWalkRoutes called with invalid parameters!");
         return;
     }
@@ -638,8 +638,8 @@ async function findWalkRoutes(graph, nodes, startNodeId, endNodeId, endLat, endL
         const currentG = current.g;
 
         // --- Goal Check --- 
-        if (currentNodeId === endNodeId) {
-            console.log(`%cDEBUG: Goal Check - Reached END node ${endNodeId}!`, 'color: green; font-weight: bold;');
+        if (currentNodeId === startNodeId) {
+            console.log(`%cDEBUG: Goal Check - Reached START node ${startNodeId}!`, 'color: green; font-weight: bold;');
             console.log(` -> Path Length (g): ${currentG.toFixed(1)}m`);
             // Include segments in the final route object
             const route = { length: currentG, path: current.path, segments: current.segments }; 
