@@ -2,7 +2,7 @@
 const POSTCODES_IO_API_URL = 'https://api.postcodes.io/postcodes/';
 const OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter';
 const ROUTE_FINDING_TIMEOUT_MS = 60000; // 60 seconds
-const LENGTH_TOLERANCE_PERCENT = 0.20; // +/- 20%
+const LENGTH_TOLERANCE_PERCENT = 0.40; // +/- 40% (Increased from 20%)
 const MAX_ROUTES_TO_FIND = 5;
 const ABSOLUTE_MAX_LENGTH_FACTOR = 10.0; // Factor for pruning paths much longer than target
 const MAX_DISTANCE_FACTOR = 10.0; // Factor for distance-based pruning (currently high)
@@ -384,6 +384,21 @@ function processOsmData(osmData, startLat, startLon, desiredLengthMeters) {
         // --- DEBUG: Visualize the graph --- 
         _debugDrawGraph(graph, nodes, startLat, startLon); // Pass startLat/Lon
 
+        // --- Log Start Node Neighbors ---
+        const startNodeCoordsLog = nodes[startNodeId] ? `(${nodes[startNodeId].lat.toFixed(5)}, ${nodes[startNodeId].lon.toFixed(5)})` : '(Coords not found)';
+        console.log(`%cDEBUG: Start Node ${startNodeId} ${startNodeCoordsLog}`, 'background: #eee; color: black;');
+        const neighborsOfStart = graph[startNodeId] || [];
+        if (neighborsOfStart.length > 0) {
+            neighborsOfStart.forEach(edge => {
+                const neighborCoordsLog = nodes[edge.neighborId] ? `(${nodes[edge.neighborId].lat.toFixed(5)}, ${nodes[edge.neighborId].lon.toFixed(5)})` : '(Coords not found)';
+                console.log(`  -> Neighbor: ${edge.neighborId} ${neighborCoordsLog} (Length: ${edge.length.toFixed(1)}m)`);
+            });
+        } else {
+             console.log('  -> No neighbors found in graph object!');
+        }
+        // console.log(graph[startNodeId] || 'No neighbors found in graph object!'); // Old log
+        // --- End Log ---
+
         // --- 4. Initiate Route Finding --- 
         console.log("Attempting to call findWalkRoutes...");
         try {
@@ -493,10 +508,22 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         const currentG = current.g;
 
         // --- Debug Log: Check neighbors if current node is a neighbor of start ---
-        // if (currentNodeId === 1178886671 || currentNodeId === 11405372363) { // Hardcoding IDs from previous log for NW1 4RY
-        //     console.log(`%cDEBUG: Processing node ${currentNodeId} (a direct neighbor of start node ${startNodeId})`, 'color: purple;');
-        //     console.log(`   Neighbors according to graph[${currentNodeId}]:`, graph[currentNodeId] || 'No neighbors listed!');
-        // }
+        // Use defined startNodeId from outer scope
+        if (currentNodeId === 1178886671 || currentNodeId === 11405372363) { // Hardcoding IDs from previous log for NW1 4RY
+            const currentCoordsLog = nodes[currentNodeId] ? `(${nodes[currentNodeId].lat.toFixed(5)}, ${nodes[currentNodeId].lon.toFixed(5)})` : '(Coords not found)';
+            console.log(`%cDEBUG: Processing node ${currentNodeId} ${currentCoordsLog} (a direct neighbor of start node ${startNodeId})`, 'color: purple;');
+            const itsNeighbors = graph[currentNodeId] || [];
+            if (itsNeighbors.length > 0) {
+                itsNeighbors.forEach(edge => {
+                     const neighborCoordsLog = nodes[edge.neighborId] ? `(${nodes[edge.neighborId].lat.toFixed(5)}, ${nodes[edge.neighborId].lon.toFixed(5)})` : '(Coords not found)';
+                     let isStartNode = edge.neighborId === startNodeId ? ' (IS START NODE)' : '';
+                     console.log(`   -> Its Neighbor: ${edge.neighborId} ${neighborCoordsLog} (Length: ${edge.length.toFixed(1)}m)${isStartNode}`);
+                });
+            } else {
+                console.log('   -> No neighbors listed!');
+            }
+            // console.log(`   Neighbors according to graph[${currentNodeId}]:`, graph[currentNodeId] || 'No neighbors listed!'); // Old log
+        }
         // --- End Debug Log ---
 
         // DEBUG: Log current node
