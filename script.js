@@ -508,6 +508,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
         const currentG = current.g;
 
         // --- Debug Log: Check neighbors if current node is a neighbor of start ---
+/*
         // Use defined startNodeId from outer scope
         if (currentNodeId === 1178886671 || currentNodeId === 11405372363) { // Hardcoding IDs from previous log for NW1 4RY
             const currentCoordsLog = nodes[currentNodeId] ? `(${nodes[currentNodeId].lat.toFixed(5)}, ${nodes[currentNodeId].lon.toFixed(5)})` : '(Coords not found)';
@@ -524,6 +525,7 @@ async function findWalkRoutes(graph, startNodeId, targetLength, startLat, startL
             }
             // console.log(`   Neighbors according to graph[${currentNodeId}]:`, graph[currentNodeId] || 'No neighbors listed!'); // Old log
         }
+*/
         // --- End Debug Log ---
 
         // DEBUG: Log current node
