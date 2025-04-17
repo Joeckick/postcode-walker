@@ -178,9 +178,29 @@ async function findRoutes() {
             }
 
         } else if (walkType === 'round_trip') {
-            console.log("Round trip selected. Logic not yet implemented.");
-            resultsDiv.innerHTML = `<p>Round trip walk finding is not yet implemented.</p>`;
-            // TODO: Implement Steps 3, 4, 5 for round trip
+            console.log("Finding round trip walk...");
+            const outwardTargetDistance = desiredDistanceMeters / 2;
+            resultsDiv.innerHTML += `<p>Searching for outward path near ${(outwardTargetDistance / 1000).toFixed(1)} km...</p>`;
+            
+            const outwardRoute = await findWalkNearDistance(graph, nodes, startNodeId, outwardTargetDistance);
+
+            if (outwardRoute && outwardRoute.segments && outwardRoute.segments.length > 0) {
+                console.log(`Found outward path: Length=${outwardRoute.length.toFixed(0)}m`);
+                resultsDiv.innerHTML += `<h3>Found Outward Path:</h3><ul>`;
+                resultsDiv.innerHTML += `<li>Approx. Length: ${(outwardRoute.length / 1000).toFixed(1)} km (${outwardRoute.length.toFixed(0)}m)</li>`;
+                
+                // Draw outward path (index 1 = blue)
+                drawRoute(outwardRoute, 1); 
+                 resultsDiv.innerHTML += `</ul>`;
+                
+                resultsDiv.innerHTML += `<p>STEP 3 TEST: Found outward path. Return path finding not yet implemented.</p>`;
+                 // TODO: Implement Step 4 - find return path using A*
+                 return; // Stop here for Step 3 testing
+
+            } else {
+                resultsDiv.innerHTML = `<p>Could not find a suitable outward path near ${(outwardTargetDistance / 1000).toFixed(1)} km.</p>`; // Use =
+                alert(`Could not find an outward path. Try a different distance or start point.`);
+            }
         
         } else {
             console.error("Unknown walk type selected:", walkType);
