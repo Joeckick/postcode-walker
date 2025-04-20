@@ -73,10 +73,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { jsPDF } = window.jspdf;
                 
                 console.log("Capturing map image...");
+                console.log("DEBUG: Map object before leafletImage:", map); // DEBUG
                 leafletImage(map, function(err, canvas) {
+                    console.log("DEBUG: Entered leafletImage callback."); // DEBUG
                     if (err) {
-                        console.error("Error capturing map image:", err);
-                        throw new Error("Failed to capture map image."); 
+                        console.error("leaflet-image failed:", err); // DEBUG
+                        // Restore button state on specific image error
+                        downloadPdfButton.textContent = originalButtonText;
+                        downloadPdfButton.disabled = false;
+                        alert("Error capturing map image. See console for details."); // User feedback
+                        return; // Stop processing on error
                     }
                     console.log("Map image captured. Generating PDF...");
                     const mapImageDataUrl = canvas.toDataURL('image/png');
