@@ -170,28 +170,37 @@ document.addEventListener('DOMContentLoaded', () => {
                     //     instructionsText = generateInstructions(lastGeneratedRoute.segments); // Regen or get from HTML?
                     // }
                      // Temporary: Get instructions from HTML (might include HTML tags)
-                    const instructionsElement = document.querySelector('#results ol');
-                    if (instructionsElement) {
-                        // Basic text extraction - might need refinement
-                        instructionsText = Array.from(instructionsElement.querySelectorAll('li')).map(li => li.textContent).join('\n');
-                    } else {
-                        instructionsText = "Could not find instructions element.";
-                    }
-                    
-                    // Add info to PDF
-                    doc.setFontSize(12);
-                    currentY = addText(`Start Postcode: ${startPostcode}`, 12, margin, currentY);
-                    currentY = addText(`Desired Distance: ${desiredDistanceKm} km`, 12, margin, currentY);
-                    currentY = addText(`Walk Type: ${walkType === 'one_way' ? 'One Way' : 'There and Back'}`, 12, margin, currentY);
-                    // currentY = addText(`Actual Length: ${actualLengthText}`, 12, margin, currentY); // Needs proper data access
-                    currentY += 5; // Add a bit more space
-
-                    // Add Instructions Header
-                    currentY = addText(`Instructions:`, 14, margin, currentY);
-                    currentY += 2;
-                    // Add Instructions Text
-                    currentY = addText(instructionsText, 10, margin, currentY);
-                    
+                     console.log("DEBUG: Querying for #results ol..."); // DEBUG
+                     const instructionsElement = document.querySelector('#results ol');
+                     console.log("DEBUG: instructionsElement:", instructionsElement); // DEBUG
+                     if (instructionsElement) {
+                         // Basic text extraction - might need refinement
+                         instructionsText = Array.from(instructionsElement.querySelectorAll('li')).map(li => li.textContent).join('\n');
+                     } else {
+                         instructionsText = "Could not find instructions element in DOM."; // More specific message
+                     }
+                     console.log("DEBUG: instructionsText:", instructionsText); // DEBUG
+                     
+                     // Add info to PDF
+                     doc.setFontSize(12);
+                     console.log("DEBUG: Calling addText for postcode..."); // DEBUG
+                     currentY = addText(`Start Postcode: ${startPostcode}`, 12, margin, currentY);
+                     console.log("DEBUG: Calling addText for desired distance..."); // DEBUG
+                     currentY = addText(`Desired Distance: ${desiredDistanceKm} km`, 12, margin, currentY);
+                     console.log("DEBUG: Calling addText for walk type..."); // DEBUG
+                     currentY = addText(`Walk Type: ${walkType === 'one_way' ? 'One Way' : 'There and Back'}`, 12, margin, currentY);
+                     // currentY = addText(`Actual Length: ${actualLengthText}`, 12, margin, currentY); // Needs proper data access
+                     currentY += 5; // Add a bit more space
+ 
+                     // Add Instructions Header
+                     console.log("DEBUG: Calling addText for Instructions Header..."); // DEBUG
+                     currentY = addText(`Instructions:`, 14, margin, currentY);
+                     currentY += 2;
+                     // Add Instructions Text
+                     console.log("DEBUG: Calling addText for Instructions Text..."); // DEBUG
+                     currentY = addText(instructionsText, 10, margin, currentY);
+                     console.log("DEBUG: Finished adding text."); // DEBUG
+                     
 
                     console.log("Saving PDF...");
                     doc.save('postcode-walk-map.pdf');
