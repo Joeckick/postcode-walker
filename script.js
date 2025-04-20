@@ -53,28 +53,84 @@ document.addEventListener('DOMContentLoaded', () => {
     if (downloadPdfButton) {
         downloadPdfButton.addEventListener('click', () => {
             console.log("Download PDF button clicked!");
-            // --- Basic PDF Generation --- 
+            
+            // Show a temporary message
+            const originalButtonText = downloadPdfButton.textContent;
+            downloadPdfButton.textContent = "Generating PDF...";
+            downloadPdfButton.disabled = true;
+
             try {
+                // Ensure leaflet-image is loaded
+                if (typeof leafletImage === 'undefined') {
+                    console.error("leaflet-image library not found!");
+                    throw new Error("Map capture library is not loaded.");
+                }
                 // Ensure jsPDF is loaded
                 if (typeof window.jspdf === 'undefined') {
                     console.error("jsPDF library not found!");
-                    alert("PDF generation library is not loaded.");
-                    return;
+                    throw new Error("PDF generation library is not loaded.");
                 }
                 const { jsPDF } = window.jspdf;
                 
-                console.log("Creating jsPDF document...");
-                const doc = new jsPDF();
-                
-                doc.text("Postcode Walker PDF Test", 10, 10);
-                
-                console.log("Saving PDF...");
-                doc.save('postcode-walk-test.pdf');
-                console.log("PDF save initiated.");
+                console.log("Capturing map image...");
+                leafletImage(map, function(err, canvas) {
+                    if (err) {
+                        console.error("Error capturing map image:", err);
+                        throw new Error("Failed to capture map image."); 
+                    }
+                    console.log("Map image captured. Generating PDF...");
+                    const mapImageDataUrl = canvas.toDataURL('image/png');
+                    
+                    const doc = new jsPDF({
+                        orientation: "portrait",
+                        unit: "mm",
+                        format: "a4"
+                    });
+
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const pageHeight = doc.internal.pageSize.getHeight();
+                    const margin = 10; // 10mm margin
+                    const contentWidth = pageWidth - (margin * 2);
+                    
+                    // --- Add Title --- 
+                    doc.setFontSize(18);
+                    doc.text("Postcode Walker Route", margin, margin + 5);
+                    
+                    // --- Add Map Image --- 
+                    // Calculate image dimensions to fit width (maintain aspect ratio)
+                    const imgProps = doc.getImageProperties(mapImageDataUrl);
+                    const imgWidth = contentWidth; // Fit image to content width
+                    const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+                    let mapYPosition = margin + 15; // Position below title
+                    
+                    // Check if image might exceed page height (very rough check for now)
+                    if (mapYPosition + imgHeight > pageHeight - margin) {
+                        console.warn("Map image might be too large for a single page.");
+                        // Basic handling: reduce size slightly (better handling later)
+                        // For now, we'll let it potentially overflow - addPage logic later
+                    }
+                    
+                    doc.addImage(mapImageDataUrl, 'PNG', margin, mapYPosition, imgWidth, imgHeight);
+                    console.log("Map image added to PDF.");
+                    
+                    // --- Add Instructions etc later --- 
+                    // For now, just save
+
+                    console.log("Saving PDF...");
+                    doc.save('postcode-walk-map.pdf');
+                    console.log("PDF save initiated.");
+
+                    // Restore button state
+                    downloadPdfButton.textContent = originalButtonText;
+                    downloadPdfButton.disabled = false;
+                });
 
             } catch (error) {
-                console.error("Error generating basic PDF:", error);
-                alert("An error occurred while generating the PDF.");
+                console.error("Error during PDF generation process:", error);
+                alert(`An error occurred while generating the PDF: ${error.message}`);
+                // Restore button state even on error
+                downloadPdfButton.textContent = originalButtonText;
+                downloadPdfButton.disabled = false;
             }
         });
         console.log("Attached click listener to download-pdf-btn");
@@ -99,6 +155,7 @@ async function findRoutes() {
     const spinner = document.getElementById('loading-spinner'); 
     
     // Clear previous results and show spinner
+    resultsDiv.innerHTML = '<h2>Results</h2>'; // Clear previous text content
     if (spinner) spinner.classList.remove('hidden'); 
 
     // --- Input Validation ---
