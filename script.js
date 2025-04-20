@@ -34,7 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add the OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        crossOrigin: 'anonymous' // Attempt to enable CORS for tile images
     }).addTo(map);
 
     console.log("Map initialized");
