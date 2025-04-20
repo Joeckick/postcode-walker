@@ -53,7 +53,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (downloadPdfButton) {
         downloadPdfButton.addEventListener('click', () => {
             console.log("Download PDF button clicked!");
-            // PDF generation logic will go here later
+            // --- Basic PDF Generation --- 
+            try {
+                // Ensure jsPDF is loaded
+                if (typeof window.jspdf === 'undefined') {
+                    console.error("jsPDF library not found!");
+                    alert("PDF generation library is not loaded.");
+                    return;
+                }
+                const { jsPDF } = window.jspdf;
+                
+                console.log("Creating jsPDF document...");
+                const doc = new jsPDF();
+                
+                doc.text("Postcode Walker PDF Test", 10, 10);
+                
+                console.log("Saving PDF...");
+                doc.save('postcode-walk-test.pdf');
+                console.log("PDF save initiated.");
+
+            } catch (error) {
+                console.error("Error generating basic PDF:", error);
+                alert("An error occurred while generating the PDF.");
+            }
         });
         console.log("Attached click listener to download-pdf-btn");
     } else {
