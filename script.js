@@ -80,64 +80,70 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { jsPDF } = window.jspdf;
                 console.log("DEBUG: jsPDF destructured successfully."); // DEBUG
 
-                console.log("Capturing map image...");
+                console.log("Capturing map image (with delay)...");
                 console.log("DEBUG: Map object before leafletImage:", map); // DEBUG
-                leafletImage(map, function(err, canvas) {
-                    console.log("DEBUG: Entered leafletImage callback."); // DEBUG
-                    if (err) {
-                        console.error("leaflet-image failed:", err); // DEBUG
-                        // Restore button state on specific image error
+                console.log("DEBUG: drawnRouteLayers before leafletImage:", drawnRouteLayers); // DEBUG
+                
+                // Introduce a small delay to allow route rendering
+                setTimeout(() => {
+                    console.log("DEBUG: Inside setTimeout, calling leafletImage..."); // DEBUG
+                    leafletImage(map, function(err, canvas) {
+                        console.log("DEBUG: Entered leafletImage callback."); // DEBUG
+                        if (err) {
+                            console.error("leaflet-image failed:", err); // DEBUG
+                            // Restore button state on specific image error
+                            downloadPdfButton.textContent = originalButtonText;
+                            downloadPdfButton.disabled = false;
+                            alert("Error capturing map image. See console for details."); // User feedback
+                            return; // Stop processing on error
+                        }
+                        console.log("Map image captured. Generating PDF...");
+                        const mapImageDataUrl = canvas.toDataURL('image/png');
+                        
+                        const doc = new jsPDF({
+                            orientation: "portrait",
+                            unit: "mm",
+                            format: "a4"
+                        });
+
+                        const pageWidth = doc.internal.pageSize.getWidth();
+                        const pageHeight = doc.internal.pageSize.getHeight();
+                        const margin = 10; // 10mm margin
+                        const contentWidth = pageWidth - (margin * 2);
+                        
+                        // --- Add Title --- 
+                        doc.setFontSize(18);
+                        doc.text("Postcode Walker Route", margin, margin + 5);
+                        
+                        // --- Add Map Image --- 
+                        // Calculate image dimensions to fit width (maintain aspect ratio)
+                        const imgProps = doc.getImageProperties(mapImageDataUrl);
+                        const imgWidth = contentWidth; // Fit image to content width
+                        const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+                        let mapYPosition = margin + 15; // Position below title
+                        
+                        // Check if image might exceed page height (very rough check for now)
+                        if (mapYPosition + imgHeight > pageHeight - margin) {
+                            console.warn("Map image might be too large for a single page.");
+                            // Basic handling: reduce size slightly (better handling later)
+                            // For now, we'll let it potentially overflow - addPage logic later
+                        }
+                        
+                        doc.addImage(mapImageDataUrl, 'PNG', margin, mapYPosition, imgWidth, imgHeight);
+                        console.log("Map image added to PDF.");
+                        
+                        // --- Add Instructions etc later --- 
+                        // For now, just save
+
+                        console.log("Saving PDF...");
+                        doc.save('postcode-walk-map.pdf');
+                        console.log("PDF save initiated.");
+
+                        // Restore button state
                         downloadPdfButton.textContent = originalButtonText;
                         downloadPdfButton.disabled = false;
-                        alert("Error capturing map image. See console for details."); // User feedback
-                        return; // Stop processing on error
-                    }
-                    console.log("Map image captured. Generating PDF...");
-                    const mapImageDataUrl = canvas.toDataURL('image/png');
-                    
-                    const doc = new jsPDF({
-                        orientation: "portrait",
-                        unit: "mm",
-                        format: "a4"
                     });
-
-                    const pageWidth = doc.internal.pageSize.getWidth();
-                    const pageHeight = doc.internal.pageSize.getHeight();
-                    const margin = 10; // 10mm margin
-                    const contentWidth = pageWidth - (margin * 2);
-                    
-                    // --- Add Title --- 
-                    doc.setFontSize(18);
-                    doc.text("Postcode Walker Route", margin, margin + 5);
-                    
-                    // --- Add Map Image --- 
-                    // Calculate image dimensions to fit width (maintain aspect ratio)
-                    const imgProps = doc.getImageProperties(mapImageDataUrl);
-                    const imgWidth = contentWidth; // Fit image to content width
-                    const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
-                    let mapYPosition = margin + 15; // Position below title
-                    
-                    // Check if image might exceed page height (very rough check for now)
-                    if (mapYPosition + imgHeight > pageHeight - margin) {
-                        console.warn("Map image might be too large for a single page.");
-                        // Basic handling: reduce size slightly (better handling later)
-                        // For now, we'll let it potentially overflow - addPage logic later
-                    }
-                    
-                    doc.addImage(mapImageDataUrl, 'PNG', margin, mapYPosition, imgWidth, imgHeight);
-                    console.log("Map image added to PDF.");
-                    
-                    // --- Add Instructions etc later --- 
-                    // For now, just save
-
-                    console.log("Saving PDF...");
-                    doc.save('postcode-walk-map.pdf');
-                    console.log("PDF save initiated.");
-
-                    // Restore button state
-                    downloadPdfButton.textContent = originalButtonText;
-                    downloadPdfButton.disabled = false;
-                });
+                }, 100); // 100ms delay - adjust if needed
 
             } catch (error) {
                 console.error("!!! CAUGHT ERROR during PDF generation:", error.message, error); // DEBUG
