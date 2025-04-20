@@ -135,8 +135,63 @@ document.addEventListener('DOMContentLoaded', () => {
                     doc.addImage(mapImageDataUrl, 'PNG', margin, mapYPosition, imgWidth, imgHeight);
                     console.log("Map image added to PDF.");
                     
-                    // --- Add Instructions etc later --- 
-                    // For now, just save
+                    // --- Add Text Info Below Map --- 
+                    let currentY = mapYPosition + imgHeight + 10; // Start text 10mm below image
+                    const finalLineY = pageHeight - margin; // Bottom boundary for text
+
+                    // Helper function to add text and handle page breaks
+                    const addText = (text, fontSize, x, y) => {
+                        doc.setFontSize(fontSize);
+                        const lines = doc.splitTextToSize(text, contentWidth);
+                        lines.forEach(line => {
+                            if (y > finalLineY) {
+                                doc.addPage();
+                                y = margin + 10; // Reset Y for new page
+                            }
+                            doc.text(line, x, y);
+                            y += (fontSize * 0.5); // Adjust line spacing based on font size
+                        });
+                        return y; // Return the Y position after adding text
+                    };
+
+                    // Get data (Need to ensure these are accessible or passed)
+                    // TODO: Refactor to store these details when route is generated
+                    const startPostcode = document.getElementById('postcode').value.trim();
+                    const desiredDistanceKm = parseFloat(document.getElementById('desired_distance').value);
+                    const walkType = document.querySelector('input[name="walk_type"]:checked').value;
+                    // Need access to the actual generated route object (e.g., `combinedRoute` or `route`)
+                    // For now, let's assume we have a variable `lastGeneratedRoute` available in this scope
+                    // We will need to properly scope this later.
+                    let actualLengthText = "(Actual length not available)"; 
+                    let instructionsText = "Instructions not available";
+                    // Placeholder - find a way to access the last route object
+                    // if (lastGeneratedRoute) { 
+                    //     actualLengthText = `${(lastGeneratedRoute.length / 1000).toFixed(1)} km (${lastGeneratedRoute.length.toFixed(0)}m)`;
+                    //     instructionsText = generateInstructions(lastGeneratedRoute.segments); // Regen or get from HTML?
+                    // }
+                     // Temporary: Get instructions from HTML (might include HTML tags)
+                    const instructionsElement = document.querySelector('#results ol');
+                    if (instructionsElement) {
+                        // Basic text extraction - might need refinement
+                        instructionsText = Array.from(instructionsElement.querySelectorAll('li')).map(li => li.textContent).join('\n');
+                    } else {
+                        instructionsText = "Could not find instructions element.";
+                    }
+                    
+                    // Add info to PDF
+                    doc.setFontSize(12);
+                    currentY = addText(`Start Postcode: ${startPostcode}`, 12, margin, currentY);
+                    currentY = addText(`Desired Distance: ${desiredDistanceKm} km`, 12, margin, currentY);
+                    currentY = addText(`Walk Type: ${walkType === 'one_way' ? 'One Way' : 'There and Back'}`, 12, margin, currentY);
+                    // currentY = addText(`Actual Length: ${actualLengthText}`, 12, margin, currentY); // Needs proper data access
+                    currentY += 5; // Add a bit more space
+
+                    // Add Instructions Header
+                    currentY = addText(`Instructions:`, 14, margin, currentY);
+                    currentY += 2;
+                    // Add Instructions Text
+                    currentY = addText(instructionsText, 10, margin, currentY);
+                    
 
                     console.log("Saving PDF...");
                     doc.save('postcode-walk-map.pdf');
