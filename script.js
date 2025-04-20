@@ -29,7 +29,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Initialize the map and assign it to the higher scope variable
-    map = L.map('map').setView([54.5, -3], 5); // Center roughly on UK
+    map = L.map('map', {
+        preferCanvas: true // Force Canvas renderer - might help leaflet-image capture
+    }).setView([54.5, -3], 5); // Center roughly on UK
 
     // Add the OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
