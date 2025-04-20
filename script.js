@@ -240,17 +240,22 @@ async function findRoutes() {
                         .openPopup(); // Re-add start marker if cleared
 
                     drawRoute(combinedRoute, 0); // Draw combined route in red
+                    console.log("DEBUG: After drawRoute(combinedRoute)"); // DEBUG
                     resultsDiv.innerHTML += `</ul>`;
+                    console.log("DEBUG: After adding closing ul"); // DEBUG
                     
                     const instructionsHtml = generateInstructions(combinedSegments);
+                    console.log("DEBUG: After generateInstructions"); // DEBUG
                     document.getElementById('results').innerHTML += instructionsHtml;
+                    console.log("DEBUG: After adding instructionsHtml"); // DEBUG
                     
                     // Show download button
-                    console.log("Before attempting to show PDF button (round-trip)"); // DEBUG
+                    console.log("Before attempting to show PDF button (round-trip)"); // Existing DEBUG
                     if(downloadPdfButton) downloadPdfButton.hidden = false;
-                    console.log("After attempting to show PDF button (round-trip). Hidden state:", downloadPdfButton ? downloadPdfButton.hidden : 'Button not found'); // DEBUG
+                    console.log("After attempting to show PDF button (round-trip). Hidden state:", downloadPdfButton ? downloadPdfButton.hidden : 'Button not found'); // Existing DEBUG
 
                     // Fit map
+                    console.log("DEBUG: Before map.fitBounds try block"); // DEBUG
                     try {
                          const routeLine = L.polyline(combinedRoute.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
                          if (routeLine.getLatLngs().length > 0) {
