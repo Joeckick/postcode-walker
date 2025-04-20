@@ -60,18 +60,26 @@ document.addEventListener('DOMContentLoaded', () => {
             downloadPdfButton.disabled = true;
 
             try {
+                console.log("DEBUG: Entered PDF generation try block."); // DEBUG
                 // Ensure leaflet-image is loaded
+                console.log("DEBUG: Checking typeof leafletImage..."); // DEBUG
                 if (typeof leafletImage === 'undefined') {
-                    console.error("leaflet-image library not found!");
+                    console.error("leaflet-image library check FAILED!"); // DEBUG
                     throw new Error("Map capture library is not loaded.");
                 }
+                console.log("DEBUG: leafletImage check passed."); // DEBUG
                 // Ensure jsPDF is loaded
+                console.log("DEBUG: Checking typeof window.jspdf..."); // DEBUG
                 if (typeof window.jspdf === 'undefined') {
-                    console.error("jsPDF library not found!");
+                    console.error("jsPDF library check FAILED!"); // DEBUG
                     throw new Error("PDF generation library is not loaded.");
                 }
+                console.log("DEBUG: window.jspdf check passed."); // DEBUG
+
+                console.log("DEBUG: Destructuring jsPDF..."); // DEBUG
                 const { jsPDF } = window.jspdf;
-                
+                console.log("DEBUG: jsPDF destructured successfully."); // DEBUG
+
                 console.log("Capturing map image...");
                 console.log("DEBUG: Map object before leafletImage:", map); // DEBUG
                 leafletImage(map, function(err, canvas) {
@@ -132,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
             } catch (error) {
-                console.error("Error during PDF generation process:", error);
+                console.error("!!! CAUGHT ERROR during PDF generation:", error.message, error); // DEBUG
                 alert(`An error occurred while generating the PDF: ${error.message}`);
                 // Restore button state even on error
                 downloadPdfButton.textContent = originalButtonText;
