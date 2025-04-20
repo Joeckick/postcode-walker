@@ -183,7 +183,9 @@ async function findRoutes() {
                  const instructionsHtml = generateInstructions(route.segments);
                  document.getElementById('results').innerHTML += instructionsHtml;
                  // Show download button
+                 console.log("Before attempting to show PDF button (one-way)"); // DEBUG
                  if(downloadPdfButton) downloadPdfButton.hidden = false;
+                 console.log("After attempting to show PDF button (one-way). Hidden state:", downloadPdfButton ? downloadPdfButton.hidden : 'Button not found'); // DEBUG
                  try {
                      const routeLine = L.polyline(route.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
                      if (routeLine.getLatLngs().length > 0) {
@@ -244,7 +246,9 @@ async function findRoutes() {
                     document.getElementById('results').innerHTML += instructionsHtml;
                     
                     // Show download button
+                    console.log("Before attempting to show PDF button (round-trip)"); // DEBUG
                     if(downloadPdfButton) downloadPdfButton.hidden = false;
+                    console.log("After attempting to show PDF button (round-trip). Hidden state:", downloadPdfButton ? downloadPdfButton.hidden : 'Button not found'); // DEBUG
 
                     // Fit map
                     try {
