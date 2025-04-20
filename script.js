@@ -99,7 +99,6 @@ async function findRoutes() {
     const spinner = document.getElementById('loading-spinner'); 
     
     // Clear previous results and show spinner
-    resultsDiv.innerHTML = '<h2>Results</h2>'; // Clear previous text content
     if (spinner) spinner.classList.remove('hidden'); 
 
     // --- Input Validation ---
@@ -781,7 +780,7 @@ async function findWalkRoutes(graph, nodes, startNodeId, endLat, endLon) { // Ad
 
     let iterations = 0;
     clearRoutes(); // Clear previous routes/debug graph
-    document.getElementById('results').innerHTML += '<p>Starting route search (A*)...</p>';
+    document.getElementById('results').innerHTML = '<p>Starting route search (A*)...</p>';
 
     while (openSet.length > 0) {
         iterations++;
