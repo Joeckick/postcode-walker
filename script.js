@@ -16,6 +16,9 @@ let map;
 // Define globally or in a higher scope to keep track of route layers
 let drawnRouteLayers = [];
 
+// Reference to the download button
+let downloadPdfButton = null;
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM fully loaded and parsed");
 
@@ -43,6 +46,18 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Attached click listener to find-routes-btn");
     } else {
         console.error("Find routes button not found!");
+    }
+
+    // Get reference to the download button and add listener
+    downloadPdfButton = document.getElementById('download-pdf-btn');
+    if (downloadPdfButton) {
+        downloadPdfButton.addEventListener('click', () => {
+            console.log("Download PDF button clicked!");
+            // PDF generation logic will go here later
+        });
+        console.log("Attached click listener to download-pdf-btn");
+    } else {
+        console.error("Download PDF button not found!");
     }
 
     // *** COMMENTED OUT DEBUG log for element check on load ***
@@ -89,6 +104,9 @@ async function findRoutes() {
     // --- Fetch OSM Data & Process (Common Logic) --- 
     let graph, nodes, startNodeId; // Define variables in outer scope
     try {
+        // Hide download button at the start of a new search
+        if(downloadPdfButton) downloadPdfButton.hidden = true;
+        
         resultsDiv.innerHTML += `<p>Looking up start postcode...</p>`;
         let startCoords;
         try {
@@ -164,6 +182,8 @@ async function findRoutes() {
                  resultsDiv.innerHTML += `</ul>`;
                  const instructionsHtml = generateInstructions(route.segments);
                  document.getElementById('results').innerHTML += instructionsHtml;
+                 // Show download button
+                 if(downloadPdfButton) downloadPdfButton.hidden = false;
                  try {
                      const routeLine = L.polyline(route.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
                      if (routeLine.getLatLngs().length > 0) {
@@ -223,6 +243,9 @@ async function findRoutes() {
                     const instructionsHtml = generateInstructions(combinedSegments);
                     document.getElementById('results').innerHTML += instructionsHtml;
                     
+                    // Show download button
+                    if(downloadPdfButton) downloadPdfButton.hidden = false;
+
                     // Fit map
                     try {
                          const routeLine = L.polyline(combinedRoute.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
@@ -835,7 +858,7 @@ async function findWalkRoutes(graph, nodes, startNodeId, endLat, endLon) { // Ad
         console.log(`Shortest Route: Length=${shortestRoute.length.toFixed(0)}m, Nodes=${shortestRoute.path.length}, Segments=${shortestRoute.segments.length}`); // Log segment count
         document.getElementById('results').innerHTML += `<li>Route Length: ${shortestRoute.length.toFixed(0)}m</li>`;
         drawRoute(shortestRoute, 0); // Draw the single route
-        document.getElementById('results').innerHTML += `</ul>`;
+        resultsDiv.innerHTML += `</ul>`;
         
         // Generate and display instructions
         const instructionsHtml = generateInstructions(shortestRoute.segments);
@@ -1034,6 +1057,8 @@ function generateInstructions(routeSegments) {
 function clearRoutes() {
     drawnRouteLayers.forEach(layer => map.removeLayer(layer));
     drawnRouteLayers = [];
+    // Hide download button when routes are cleared
+    if(downloadPdfButton) downloadPdfButton.hidden = true;
     // Optionally clear the results list too, or handle it where search starts
     // document.getElementById('results').innerHTML = '<h2>Results</h2>';
 }
