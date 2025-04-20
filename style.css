@@ -16,14 +16,4 @@ div {
 
 label {
     margin-right: 5px;
-}
-
-/* Ensure PDF button is visible when not hidden */
-#download-pdf-btn:not([hidden]) {
-  display: inline-block; /* Or 'block' if you prefer */
-  /* Add any other desired visible styles here, e.g., margin */
-  margin-top: 15px; 
-}
-
-/* Style for loading spinner */
-/* ... existing code ... */ 
+} 
