@@ -345,7 +345,19 @@ async function findRoutes() {
                  // --- Loop through routes --- 
                  routes.forEach((route, index) => {
                      console.log(` -> Route ${index + 1}: Length=${route.length.toFixed(0)}m, Segments=${route.segments.length}`);
-                     resultsDiv.innerHTML += `<li>Route ${index + 1} Approx. Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)</li>`;
+                     
+                     // Generate instructions first
+                     const instructionsHtml = generateInstructions(route.segments);
+
+                     // Build the complete list item HTML
+                     let routeItemHtml = `
+                        <li>
+                            Route ${index + 1} Approx. Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)
+                            <div class="route-instructions">${instructionsHtml}</div>
+                        </li>
+                     `;
+                     // Append the complete list item
+                     resultsDiv.innerHTML += routeItemHtml;
                      
                      // Add end marker for each route
                      if (nodes && route.path && route.path.length > 0) {
@@ -364,10 +376,6 @@ async function findRoutes() {
                      if (routeLayer) {
                          combinedBounds.extend(routeLayer.getBounds());
                      }
-
-                     // --- ADD Instructions for THIS route --- 
-                     const instructionsHtml = generateInstructions(route.segments);
-                     resultsDiv.innerHTML += `<div class="route-instructions">${instructionsHtml}</div>`; // Add inside loop
                  });
 
                  resultsDiv.innerHTML += `</ul>`;
@@ -439,14 +447,24 @@ async function findRoutes() {
                     
                     combinedRoundTrips.forEach((roundTrip, index) => {
                          console.log(` -> Round Trip ${index + 1}: Length=${roundTrip.length.toFixed(0)}m, Segments=${roundTrip.segments.length}`);
-                         resultsDiv.innerHTML += `<li>Round Trip ${index + 1} Approx. Length: ${(roundTrip.length / 1000).toFixed(1)} km (${roundTrip.length.toFixed(0)}m)</li>`;
+                         
+                         // Generate instructions first
+                         const instructionsHtml = generateInstructions(roundTrip.segments);
+
+                         // Build the complete list item HTML
+                         let routeItemHtml = `
+                            <li>
+                                Round Trip ${index + 1} Approx. Length: ${(roundTrip.length / 1000).toFixed(1)} km (${roundTrip.length.toFixed(0)}m)
+                                <div class="route-instructions">${instructionsHtml}</div>
+                            </li>
+                         `;
+                          // Append the complete list item
+                         resultsDiv.innerHTML += routeItemHtml;
+                         
                          const routeLayer = drawRoute(roundTrip, index); // Draw with index color
                          if (routeLayer) {
                             combinedBounds.extend(routeLayer.getBounds());
                          }
-                         // --- ADD Instructions for THIS route --- 
-                         const instructionsHtml = generateInstructions(roundTrip.segments);
-                         resultsDiv.innerHTML += `<div class="route-instructions">${instructionsHtml}</div>`; // Add inside loop
                     });
                     
                     resultsDiv.innerHTML += `</ul>`;
