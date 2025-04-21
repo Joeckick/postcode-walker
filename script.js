@@ -191,7 +191,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log("DEBUG: instructionsText:", instructionsText); // DEBUG
                      
                      // Add info to PDF
-                     doc.setFontSize(12);
                      console.log("DEBUG: Calling addText for postcode..."); // DEBUG
                      currentY = addText(`Start Postcode: ${startPostcode}`, 12, margin, currentY);
                      console.log("DEBUG: Calling addText for desired distance..."); // DEBUG
@@ -201,20 +200,45 @@ document.addEventListener('DOMContentLoaded', () => {
                      // currentY = addText(`Actual Length: ${actualLengthText}`, 12, margin, currentY); // Needs proper data access
                      currentY += 5; // Add a bit more space
  
-                     // Add Instructions Header
-                     console.log("DEBUG: Calling addText for Instructions Header..."); // DEBUG
-                     currentY = addText(`Instructions:`, 14, margin, currentY);
-                     currentY += 2;
-                     // Add Instructions Text
-                     console.log("DEBUG: Calling addText for Instructions Text..."); // DEBUG
-                     // --- TODO: Modify this part in Step 2 to loop through pdfRoutes --- 
+                     // --- Loop through each generated route --- 
                      if (pdfRoutes && pdfRoutes.length > 0) {
-                        // For now, just use first route's instructions
-                        instructionsText = generateInstructions(pdfRoutes[0].segments);
+                         pdfRoutes.forEach((route, index) => {
+                             console.log(`DEBUG: Adding Route ${index + 1} to PDF...`);
+                             // Add a separator/page break before route 2, 3 etc.
+                             if (index > 0) {
+                                 // Option 1: Simple Separator
+                                 // currentY += 5;
+                                 // doc.setLineWidth(0.5);
+                                 // doc.line(margin, currentY, pageWidth - margin, currentY);
+                                 // currentY += 5;
+                                 
+                                 // Option 2: Page break (if space allows, otherwise addPage in addText handles it)
+                                 doc.addPage();
+                                 currentY = margin + 10; // Reset Y for new page
+                             }
+
+                             // Route Title
+                             const routeTitle = `Route ${index + 1}${walkType === 'round_trip' ? ' (Round Trip)' : ' (One Way)'}`;
+                             currentY = addText(routeTitle, 14, margin, currentY);
+                             currentY += 2;
+
+                             // Actual Length
+                             const actualLength = `Actual Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)`;
+                             currentY = addText(actualLength, 12, margin, currentY);
+                             currentY += 4; // Space before instructions
+
+                             // Instructions
+                             currentY = addText("Instructions:", 12, margin, currentY);
+                             currentY += 2;
+                             const instructionsText = generateInstructions(route.segments);
+                             currentY = addText(instructionsText, 10, margin, currentY);
+                             console.log(`DEBUG: Finished adding Route ${index + 1} to PDF.`);
+                         });
                      } else {
-                        instructionsText = "No route segments found in data.";
+                         currentY = addText("No routes found in the generated data.", 12, margin, currentY);
                      }
-                     currentY = addText(instructionsText, 10, margin, currentY);
+                     // --- End loop --- 
+
                      console.log("DEBUG: Finished adding text."); // DEBUG
                      
 
