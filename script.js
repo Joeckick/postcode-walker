@@ -834,12 +834,12 @@ async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
             console.log(`Found candidate route ${foundRoutes.length + 1}: Length ${currentLength.toFixed(0)}m`);
             foundRoutes.push(newRoute);
             // Stop searching if we have enough routes
-            if (foundRoutes.length >= maxRoutesToReturn) {
-                console.log(`Found ${maxRoutesToReturn} routes, stopping DFS.`);
-                break; // Exit the while loop
-            }
+            // --- REMOVED Early Exit --- 
+            // if (foundRoutes.length >= maxRoutesToReturn) {
+            //     console.log(`Found ${maxRoutesToReturn} routes, stopping DFS.`);
+            //     break; // Exit the while loop
+            // }
             // --- REMOVED minDiff tracking --- 
-            // if (diff < minDiff) { ... }
         }
         
         // If current path is already much longer than target, prune this branch
@@ -888,8 +888,75 @@ async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
          console.log(`DFS finished in ${endTime - startTime}ms. No suitable route found near ${targetDistance}m.`);
     }
     
-    // --- MODIFIED: Return the array --- 
-    return foundRoutes; // Return array (might be empty)
+    // --- MODIFIED: Select diverse routes --- 
+    if (foundRoutes.length <= maxRoutesToReturn) {
+        return foundRoutes; // Return all if 3 or fewer found
+    }
+
+    console.log(`Found ${foundRoutes.length} candidate routes. Selecting diverse set...`);
+    const diverseRoutes = [];
+    const selectedEndpoints = [];
+    const DIVERSITY_THRESHOLD_METERS = 500; // Min distance between endpoints (tune this value)
+
+    // Add the first route automatically (it's often a good direct-ish path)
+    if (foundRoutes.length > 0) {
+        const firstRoute = foundRoutes[0];
+        const endNodeId = firstRoute.path[firstRoute.path.length - 1];
+        const endCoords = nodes[endNodeId];
+        if (endCoords) {
+            diverseRoutes.push(firstRoute);
+            selectedEndpoints.push(turf.point([endCoords.lon, endCoords.lat]));
+        } else {
+            console.warn("Could not get endpoint coords for first route, skipping it.");
+        }
+    }
+
+    // Iterate through remaining routes to find diverse ones
+    for (let i = 1; i < foundRoutes.length && diverseRoutes.length < maxRoutesToReturn; i++) {
+        const candidateRoute = foundRoutes[i];
+        const endNodeId = candidateRoute.path[candidateRoute.path.length - 1];
+        const endCoords = nodes[endNodeId];
+
+        if (!endCoords) {
+            console.warn(`Skipping route ${i+1} due to missing endpoint coordinates.`);
+            continue; // Skip if endpoint data missing
+        }
+
+        const candidateEndpoint = turf.point([endCoords.lon, endCoords.lat]);
+        let isDiverseEnough = true;
+
+        // Check distance against already selected endpoints
+        for (const selectedPt of selectedEndpoints) {
+            const distance = turf.distance(candidateEndpoint, selectedPt, { units: 'meters' });
+            if (distance < DIVERSITY_THRESHOLD_METERS) {
+                isDiverseEnough = false;
+                break; // Too close to an existing selection
+            }
+        }
+
+        if (isDiverseEnough) {
+            diverseRoutes.push(candidateRoute);
+            selectedEndpoints.push(candidateEndpoint);
+            console.log(` -> Selected diverse route ${i+1} (Endpoint distance sufficient)`);
+        }
+    }
+
+    // If we still don't have enough routes, fill with the next available ones
+    // This ensures we always return up to maxRoutesToReturn if possible
+    let backupIndex = 1; // Start looking from the second route again
+    while (diverseRoutes.length < maxRoutesToReturn && backupIndex < foundRoutes.length) {
+        const backupRoute = foundRoutes[backupIndex];
+        // Check if this route is already in diverseRoutes
+        const alreadySelected = diverseRoutes.some(dr => dr === backupRoute);
+        if (!alreadySelected) {
+            diverseRoutes.push(backupRoute);
+            console.log(` -> Added backup route ${backupIndex + 1} to reach count of ${diverseRoutes.length}`);
+        }
+        backupIndex++;
+    }
+
+    console.log(`Returning ${diverseRoutes.length} selected diverse routes.`);
+    return diverseRoutes; 
 }
 
 // --- Step 6: Routing Algorithm ---
