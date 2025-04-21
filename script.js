@@ -19,6 +19,9 @@ let drawnRouteLayers = [];
 // Reference to the download button
 let downloadPdfButton = null;
 
+// --- ADDED: Store last successfully generated route data ---
+let lastGeneratedRouteData = null; 
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM fully loaded and parsed");
 
@@ -154,14 +157,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         return y; // Return the Y position after adding text
                     };
 
-                    // Get data (Need to ensure these are accessible or passed)
-                    // TODO: Refactor to store these details when route is generated
-                    const startPostcode = document.getElementById('postcode').value.trim();
-                    const desiredDistanceKm = parseFloat(document.getElementById('desired_distance').value);
-                    const walkType = document.querySelector('input[name="walk_type"]:checked').value;
-                    // Need access to the actual generated route object (e.g., `combinedRoute` or `route`)
-                    // For now, let's assume we have a variable `lastGeneratedRoute` available in this scope
-                    // We will need to properly scope this later.
+                    // --- Use stored data --- 
+                    if (!lastGeneratedRouteData) {
+                        console.error("No route data available for PDF generation.");
+                        alert("Could not find generated route data to create PDF.");
+                        // Restore button state if data missing
+                        downloadPdfButton.textContent = originalButtonText;
+                        downloadPdfButton.disabled = false;
+                        return; 
+                    }
+                    const { startPostcode, desiredDistanceKm, walkType, routes: pdfRoutes } = lastGeneratedRouteData;
+                    
                     let actualLengthText = "(Actual length not available)"; 
                     let instructionsText = "Instructions not available";
                     // Placeholder - find a way to access the last route object
@@ -170,6 +176,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     //     instructionsText = generateInstructions(lastGeneratedRoute.segments); // Regen or get from HTML?
                     // }
                      // Temporary: Get instructions from HTML (might include HTML tags)
+                     // --- REMOVED DOM scraping for instructions --- 
+                     /*
                      console.log("DEBUG: Querying for #results ol..."); // DEBUG
                      const instructionsElement = document.querySelector('#results ol');
                      console.log("DEBUG: instructionsElement:", instructionsElement); // DEBUG
@@ -179,7 +187,8 @@ document.addEventListener('DOMContentLoaded', () => {
                      } else {
                          instructionsText = "Could not find instructions element in DOM."; // More specific message
                      }
-                     console.log("DEBUG: instructionsText:", instructionsText); // DEBUG
+                     */
+                    console.log("DEBUG: instructionsText:", instructionsText); // DEBUG
                      
                      // Add info to PDF
                      doc.setFontSize(12);
@@ -198,6 +207,13 @@ document.addEventListener('DOMContentLoaded', () => {
                      currentY += 2;
                      // Add Instructions Text
                      console.log("DEBUG: Calling addText for Instructions Text..."); // DEBUG
+                     // --- TODO: Modify this part in Step 2 to loop through pdfRoutes --- 
+                     if (pdfRoutes && pdfRoutes.length > 0) {
+                        // For now, just use first route's instructions
+                        instructionsText = generateInstructions(pdfRoutes[0].segments);
+                     } else {
+                        instructionsText = "No route segments found in data.";
+                     }
                      currentY = addText(instructionsText, 10, margin, currentY);
                      console.log("DEBUG: Finished adding text."); // DEBUG
                      
@@ -270,7 +286,7 @@ async function findRoutes() {
         alert("Map is not ready. Please wait and try again.");
         return;
     }
-    
+
     // --- Fetch OSM Data & Process (Common Logic) --- 
     let graph, nodes, startNodeId; // Define variables in outer scope
     try {
@@ -280,21 +296,21 @@ async function findRoutes() {
         resultsDiv.innerHTML += `<p>Looking up start postcode...</p>`;
         let startCoords;
         try {
-            startCoords = await lookupPostcodeCoords(startPostcode);
-            console.log(`Start Coords: Lat: ${startCoords.latitude}, Lon: ${startCoords.longitude}`);
-            clearRoutes();
+        startCoords = await lookupPostcodeCoords(startPostcode);
+        console.log(`Start Coords: Lat: ${startCoords.latitude}, Lon: ${startCoords.longitude}`);
+        clearRoutes();
             map.setView([startCoords.latitude, startCoords.longitude], 14); 
-            L.marker([startCoords.latitude, startCoords.longitude]).addTo(map)
-                .bindPopup(`Start: ${startCoords.postcode}`)
-                .openPopup();
-        } catch (error) {
-            console.error(error);
-            resultsDiv.innerHTML = `<p>${error.message}</p>`;
+        L.marker([startCoords.latitude, startCoords.longitude]).addTo(map)
+            .bindPopup(`Start: ${startCoords.postcode}`)
+            .openPopup();
+    } catch (error) {
+        console.error(error);
+        resultsDiv.innerHTML = `<p>${error.message}</p>`;
             alert(error.message);
             if (spinner) spinner.classList.add('hidden');
-            return; 
-        }
-        
+        return;
+    }
+
         resultsDiv.innerHTML += `<p>Calculating search area...</p>`;
         let searchBbox;
         try {
@@ -322,7 +338,7 @@ async function findRoutes() {
              resultsDiv.innerHTML = '<p>No map features (paths, roads) found for the area.</p>';
              alert("No map data found for this area.");
              if (spinner) spinner.classList.add('hidden');
-             return; 
+             return;
         }
         resultsDiv.innerHTML += `<p>Fetched ${osmData.elements.length} map elements. Processing data...</p>`;
         
@@ -376,6 +392,14 @@ async function findRoutes() {
                  // --- Second step: Append structured HTML to resultsDiv --- 
                  resultsDiv.innerHTML += `<h3>Found ${routes.length} Walk(s):</h3><ul>${routeListHtml}</ul><hr/>`;
                  resultsDiv.innerHTML += instructionBlocksHtml.join(''); // Append all instruction blocks
+                 
+                 // --- Store data for PDF --- 
+                 lastGeneratedRouteData = {
+                     startPostcode: startPostcode,
+                     desiredDistanceKm: desiredDistanceKm,
+                     walkType: 'one_way',
+                     routes: routes
+                 };
                  
                  // Show download button (if any routes found)
                  if(downloadPdfButton) downloadPdfButton.hidden = false;
@@ -459,6 +483,14 @@ async function findRoutes() {
                     // --- Second step: Append structured HTML to resultsDiv --- 
                     resultsDiv.innerHTML += `<h3>Found ${combinedRoundTrips.length} Round Trip(s):</h3><ul>${routeListHtml}</ul><hr/>`;
                     resultsDiv.innerHTML += instructionBlocksHtml.join(''); // Append all instruction blocks
+                    
+                    // --- Store data for PDF --- 
+                    lastGeneratedRouteData = {
+                        startPostcode: startPostcode,
+                        desiredDistanceKm: desiredDistanceKm,
+                        walkType: 'round_trip',
+                        routes: combinedRoundTrips
+                    };
                     
                     if(downloadPdfButton) downloadPdfButton.hidden = false;
                     
@@ -733,14 +765,14 @@ function processOsmData(osmData, startLat, startLon) {
             // RE-ADD check for valid nodeData and numeric coordinates INSIDE LOOP
             if (nodeData && typeof nodeData.lat === 'number' && typeof nodeData.lon === 'number') {
                 try { 
-                    const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
+                const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
                     // Calculate distance ONLY if nodePoint is valid
-                    const distToStart = turf.distance(startPoint, nodePoint, { units: 'meters' }); 
-                    if (distToStart < minStartDistance) {
-                        minStartDistance = distToStart;
-                        startNodeId = parseInt(nodeId);
-                        startNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
-                    }
+                const distToStart = turf.distance(startPoint, nodePoint, { units: 'meters' });
+                if (distToStart < minStartDistance) {
+                    minStartDistance = distToStart;
+                    startNodeId = parseInt(nodeId);
+                    startNodeActualCoords = { lat: nodeData.lat, lon: nodeData.lon };
+                }
                 } catch (turfError) {
                      // Catch errors specifically from turf.point or turf.distance
                      console.warn(`Turf.js error processing node ${nodeId} data - skipping node.`, turfError);
@@ -1365,7 +1397,7 @@ function drawRoute(route, index) {
         // Subsequent segments: skip the first point of its geometry
         const pointsToAdd = segmentIndex === 0 ? segment.geometry : segment.geometry.slice(1);
         if (pointsToAdd) {
-            fullCoords = fullCoords.concat(pointsToAdd);
+        fullCoords = fullCoords.concat(pointsToAdd);
         }
     });
 
