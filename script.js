@@ -1204,8 +1204,8 @@ async function findWalkRoutes(graph, nodes, startNodeId, endLat, endLon) { // Ad
         resultsDiv.innerHTML += `</ul>`;
         
         // Generate and display instructions
-        const instructionsHtml = generateInstructions(shortestRoute.segments);
-        resultsDiv.innerHTML += `<div class="route-instructions">${instructionsHtml}</div>`;
+        const instructionsText = generateInstructions(shortestRoute.segments);
+        resultsDiv.innerHTML += `<div class="route-instructions">${instructionsText}</div>`;
 
         // Fit map to the route bounds
         try {
@@ -1353,10 +1353,10 @@ async function findShortestPathAStar(graph, nodes, startNodeId, endNodeId) {
 
 function generateInstructions(routeSegments) {
     if (!routeSegments || routeSegments.length === 0) {
-        return "<p>No route segments found to generate instructions.</p>";
+        return "No route segments found to generate instructions."; // Return plain text
     }
 
-    let instructions = [];
+    let instructionsList = [];
     let currentInstruction = null;
 
     routeSegments.forEach((segment, index) => {
@@ -1371,26 +1371,30 @@ function generateInstructions(routeSegments) {
             currentInstruction.distance += distance;
         } else {
             // Changed way - finalize previous instruction and start new one
-            instructions.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+            // --- MODIFIED: Add plain text to array --- 
+            instructionsList.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
             currentInstruction = { wayName: wayName, distance: distance };
         }
 
         // Add the last instruction if it exists
         if (index === routeSegments.length - 1 && currentInstruction) {
-             instructions.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+            // --- MODIFIED: Add plain text to array --- 
+             instructionsList.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
         }
     });
 
-    if (instructions.length === 0 && currentInstruction) {
+    if (instructionsList.length === 0 && currentInstruction) {
         // Handle cases where the entire route is on a single way
-        instructions.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+        // --- MODIFIED: Add plain text to array --- 
+        instructionsList.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
     }
 
-    // Format as an HTML list
-    if (instructions.length > 0) {
-        return "<h3>Instructions:</h3><ol><li>" + instructions.join("</li><li>") + "</li></ol>";
+    // --- MODIFIED: Format as numbered plain text list --- 
+    if (instructionsList.length > 0) {
+        // Add numbering and join with newlines
+        return instructionsList.map((instr, i) => `${i + 1}. ${instr}`).join("\n"); 
     } else {
-        return "<p>Could not generate instructions from route segments.</p>";
+        return "Could not generate instructions from route segments."; // Return plain text
     }
 }
 
