@@ -339,25 +339,20 @@ async function findRoutes() {
             // --- MODIFIED: Process array of routes --- 
             if (routes && routes.length > 0) {
                  console.log(`Found ${routes.length} walk(s).`);
-                 resultsDiv.innerHTML += `<h3>Found ${routes.length} Walk(s):</h3><ul>`;
+                 // --- MODIFIED: Build HTML strings separately --- 
+                 let routeListHtml = "";
+                 let instructionBlocksHtml = [];
                  let combinedBounds = L.latLngBounds([]); // To fit map later
 
-                 // --- Loop through routes --- 
+                 // --- First loop: Build summary list and collect instructions --- 
                  routes.forEach((route, index) => {
                      console.log(` -> Route ${index + 1}: Length=${route.length.toFixed(0)}m, Segments=${route.segments.length}`);
+                     // Add to summary list
+                     routeListHtml += `<li>Route ${index + 1} Approx. Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)</li>`;
                      
-                     // Generate instructions first
+                     // Generate and store instructions HTML block
                      const instructionsHtml = generateInstructions(route.segments);
-
-                     // Build the complete list item HTML
-                     let routeItemHtml = `
-                        <li>
-                            Route ${index + 1} Approx. Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)
-                            <div class="route-instructions">${instructionsHtml}</div>
-                        </li>
-                     `;
-                     // Append the complete list item
-                     resultsDiv.innerHTML += routeItemHtml;
+                     instructionBlocksHtml.push(`<h3>Route ${index + 1} Instructions:</h3>${instructionsHtml}`);
                      
                      // Add end marker for each route
                      if (nodes && route.path && route.path.length > 0) {
@@ -377,8 +372,11 @@ async function findRoutes() {
                          combinedBounds.extend(routeLayer.getBounds());
                      }
                  });
-
-                 resultsDiv.innerHTML += `</ul>`;
+                 
+                 // --- Second step: Append structured HTML to resultsDiv --- 
+                 resultsDiv.innerHTML += `<h3>Found ${routes.length} Walk(s):</h3><ul>${routeListHtml}</ul><hr/>`;
+                 resultsDiv.innerHTML += instructionBlocksHtml.join(''); // Append all instruction blocks
+                 
                  // Show download button (if any routes found)
                  if(downloadPdfButton) downloadPdfButton.hidden = false;
                  
@@ -439,27 +437,18 @@ async function findRoutes() {
                 // --- Process the combined round trips --- 
                 if (combinedRoundTrips.length > 0) {
                     console.log(`Successfully generated ${combinedRoundTrips.length} complete round trip(s).`);
-                    resultsDiv.innerHTML += `<h3>Found ${combinedRoundTrips.length} Round Trip(s):</h3><ul>`;
-                    
-                    // Clear previous single path drawing & re-add start marker IF clearRoutes was called at start
-                    // clearRoutes(); 
-                    // L.marker([startCoords.latitude, startCoords.longitude]).addTo(map).bindPopup(`Start/End: ${startCoords.postcode}`).openPopup();
+                    // --- MODIFIED: Build HTML strings separately --- 
+                    let routeListHtml = "";
+                    let instructionBlocksHtml = [];
                     
                     combinedRoundTrips.forEach((roundTrip, index) => {
                          console.log(` -> Round Trip ${index + 1}: Length=${roundTrip.length.toFixed(0)}m, Segments=${roundTrip.segments.length}`);
+                         // Add to summary list
+                         routeListHtml += `<li>Round Trip ${index + 1} Approx. Length: ${(roundTrip.length / 1000).toFixed(1)} km (${roundTrip.length.toFixed(0)}m)</li>`;
                          
-                         // Generate instructions first
+                         // Generate and store instructions HTML block
                          const instructionsHtml = generateInstructions(roundTrip.segments);
-
-                         // Build the complete list item HTML
-                         let routeItemHtml = `
-                            <li>
-                                Round Trip ${index + 1} Approx. Length: ${(roundTrip.length / 1000).toFixed(1)} km (${roundTrip.length.toFixed(0)}m)
-                                <div class="route-instructions">${instructionsHtml}</div>
-                            </li>
-                         `;
-                          // Append the complete list item
-                         resultsDiv.innerHTML += routeItemHtml;
+                         instructionBlocksHtml.push(`<h3>Round Trip ${index + 1} Instructions:</h3>${instructionsHtml}`);
                          
                          const routeLayer = drawRoute(roundTrip, index); // Draw with index color
                          if (routeLayer) {
@@ -467,8 +456,10 @@ async function findRoutes() {
                          }
                     });
                     
-                    resultsDiv.innerHTML += `</ul>`;
-                    // Show download button (if any routes found)
+                    // --- Second step: Append structured HTML to resultsDiv --- 
+                    resultsDiv.innerHTML += `<h3>Found ${combinedRoundTrips.length} Round Trip(s):</h3><ul>${routeListHtml}</ul><hr/>`;
+                    resultsDiv.innerHTML += instructionBlocksHtml.join(''); // Append all instruction blocks
+                    
                     if(downloadPdfButton) downloadPdfButton.hidden = false;
                     
                     try {
