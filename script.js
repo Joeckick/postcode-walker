@@ -57,124 +57,137 @@ document.addEventListener('DOMContentLoaded', () => {
     // Get reference to the download button and add listener
     downloadPdfButton = document.getElementById('download-pdf-btn');
     if (downloadPdfButton) {
-        downloadPdfButton.addEventListener('click', () => {
-            console.log("Download PDF button clicked!");
+        downloadPdfButton.addEventListener('click', async () => { // Make listener async
+            console.log("'Generate Premium PDF' button clicked - calling backend");
             
             const originalButtonText = downloadPdfButton.textContent;
-            downloadPdfButton.textContent = "Generating PDF...";
+            downloadPdfButton.textContent = "Sending request..."; 
             downloadPdfButton.disabled = true;
 
             try {
-                // --- Ensure jsPDF is loaded --- 
-                if (typeof window.jspdf === 'undefined') throw new Error("jsPDF library not loaded.");
-                const { jsPDF } = window.jspdf;
-                
-                // --- Ensure html2canvas is loaded --- 
-                if (typeof html2canvas === 'undefined') throw new Error("html2canvas library not loaded.");
-
-                // --- Get Route Data --- 
+                // --- Get Route Data & VALIDATE SELECTION --- 
                 if (!lastGeneratedRouteData || !lastGeneratedRouteData.routes || lastGeneratedRouteData.routes.length === 0) {
-                    throw new Error("No valid route data found for PDF.");
+                    throw new Error("No route data available.");
                 }
-                const { startPostcode, desiredDistanceKm, walkType, routes: pdfRoutes } = lastGeneratedRouteData;
-                const firstRoute = pdfRoutes[0]; // Use only the first route for now
-
-                // --- Get Map Element --- 
+                if (typeof lastGeneratedRouteData.selectedIndex !== 'number') {
+                    throw new Error("No route selected from the list.");
+                }
+                
+                // --- Capture Map Image --- 
+                console.log("Capturing map image with html2canvas...");
                 const mapElement = document.getElementById('map');
-                if (!mapElement) throw new Error("Map element not found.");
-
-                console.log("Capturing map with html2canvas...");
-                html2canvas(mapElement, { useCORS: true, logging: false })
-                    .then(canvas => {
-                        console.log("html2canvas success. Building PDF...");
+                if (!mapElement) throw new Error("Map element not found for capture.");
+                if (typeof html2canvas === 'undefined') throw new Error("html2canvas library not loaded.");
+                
+                const canvas = await html2canvas(mapElement, { 
+                    useCORS: true, 
+                    logging: false, 
+                    scale: 1 // Use scale 1 for reasonable data size, backend can resize
+                });
                         const mapImageDataUrl = canvas.toDataURL('image/png');
-                        
-                        // --- Initialize PDF --- 
-                        const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-                        const pageWidth = doc.internal.pageSize.getWidth();
-                        const pageHeight = doc.internal.pageSize.getHeight();
-                        const margin = 10;
-                        const contentWidth = pageWidth - (margin * 2);
-                        let currentY = margin;
+                console.log("Map captured. Data URL length:", mapImageDataUrl.length);
+                // Basic check for excessively large data URL (e.g., > 5MB)
+                if (mapImageDataUrl.length > 5 * 1024 * 1024) {
+                    console.warn("Captured map image data is very large. Consider optimizing.");
+                    // Optionally, prevent sending if too large?
+                    // throw new Error("Map image is too large to send."); 
+                }
 
-                        // --- PDF Helper Function --- 
-                        const addText = (text, fontSize, x, y) => {
-                            doc.setFontSize(fontSize);
-                            const lines = doc.splitTextToSize(text, contentWidth);
-                            let lineY = y;
-                            lines.forEach(line => {
-                                if (lineY > pageHeight - margin) { 
-                                    doc.addPage();
-                                    lineY = margin;
-                                }
-                                doc.text(line, x, lineY);
-                                lineY += (fontSize * 0.5);
-                            });
-                            return lineY;
-                        };
-
-                        // --- Add Content --- 
-                        // Title
-                        currentY = addText("Postcode Walker Route", 18, margin, currentY);
-                        currentY += 5;
-
-                        // Map Image
-                        try {
-                            const imgProps = doc.getImageProperties(mapImageDataUrl);
-                            const imgWidth = contentWidth;
-                            const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
-                            const mapMaxHeight = pageHeight * 0.4;
-                            const finalImgHeight = Math.min(imgHeight, mapMaxHeight);
-                            if (currentY + finalImgHeight <= pageHeight - margin) {
-                                doc.addImage(mapImageDataUrl, 'PNG', margin, currentY, imgWidth, finalImgHeight);
-                                currentY += finalImgHeight + 5;
-                            } else {
-                                currentY = addText("[Map image omitted - too large for page]", 10, margin, currentY);
-                            }
-                        } catch(imgError) {
-                            console.error("Error adding map image to PDF:", imgError);
-                             currentY = addText("[Error adding map image to PDF]", 10, margin, currentY);
+                // --- Prepare data to send (including map image) --- 
+                const dataToSend = { 
+                    ...lastGeneratedRouteData, 
+                    nodes: null, // Still exclude full nodes data for now
+                    mapImageDataUrl: mapImageDataUrl // Add the map image data
+                }; 
+                const selectedRoute = dataToSend.routes[dataToSend.selectedIndex];
+                if (typeof nodes !== 'undefined' && selectedRoute && selectedRoute.path) {
+                    const relevantNodes = {};
+                    selectedRoute.path.forEach(nodeId => {
+                        if (nodes[nodeId]) {
+                            relevantNodes[nodeId] = nodes[nodeId];
                         }
-                        
-                        // Basic Info
-                        currentY = addText(`Start Postcode: ${startPostcode}`, 12, margin, currentY);
-                        currentY = addText(`Desired Distance: ${desiredDistanceKm} km`, 12, margin, currentY);
-                        currentY = addText(`Walk Type: ${walkType === 'one_way' ? 'One Way' : 'There and Back'}`, 12, margin, currentY);
-                        // Actual Length (for first route)
-                        const actualLength = `Actual Length: ${(firstRoute.length / 1000).toFixed(1)} km (${firstRoute.length.toFixed(0)}m)`;
-                        currentY = addText(actualLength, 12, margin, currentY);
-                        currentY += 5;
-
-                        // Instructions (for first route)
-                        currentY = addText("Instructions:", 14, margin, currentY);
-                        currentY += 2;
-                        const instructionsText = generateInstructions(firstRoute.segments);
-                        currentY = addText(instructionsText, 10, margin, currentY);
-
-                        // --- Save PDF --- 
-                        console.log("Saving PDF...");
-                        doc.save('postcode-walk-route.pdf');
-
-                        // --- Restore Button --- 
-                        downloadPdfButton.textContent = originalButtonText;
-                        downloadPdfButton.disabled = false;
-
-                    }).catch(err => {
-                        console.error("html2canvas failed:", err);
-                        alert("Error capturing map image. See console.");
-                        downloadPdfButton.textContent = originalButtonText;
-                        downloadPdfButton.disabled = false;
                     });
+                    dataToSend.nodes = relevantNodes; 
+                    console.log(`Sending ${Object.keys(relevantNodes).length} relevant nodes.`);
+                } else {
+                    console.warn("Could not include relevant nodes data.");
+                }
+                
+                // --- Call Backend API --- 
+                console.log("Sending data to backend endpoint /api/generate-pdf");
+                const response = await fetch('http://localhost:3000/api/generate-pdf', { // Use correct backend address
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(dataToSend),
+                });
 
-            } catch (error) {
-                console.error("!!! ERROR setting up PDF generation:", error.message, error);
-                alert(`Could not generate PDF: ${error.message}`);
-                // Restore button state
+                // --- Handle Backend Response --- 
+                // Button state is reset here regardless of success/error below
                 downloadPdfButton.textContent = originalButtonText;
                 downloadPdfButton.disabled = false;
+
+                if (!response.ok) {
+                    // Handle backend ERRORS (which might send JSON)
+                    let errorMsg = `Backend Error: ${response.status} ${response.statusText}`;
+                    try {
+                        // Try to parse potential JSON error message from backend
+                        const errorData = await response.json(); 
+                        errorMsg = errorData.message || errorMsg; 
+                    } catch (e) {
+                        // Ignore if response body is not JSON (e.g., plain text error)
+                        console.warn("Could not parse backend error response as JSON.");
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                // --- Handle backend SUCCESS (expecting PDF blob) --- 
+                console.log("Backend response OK. Processing as PDF blob...");
+                
+                // Get filename from Content-Disposition header
+                const contentDisposition = response.headers.get('content-disposition');
+                let filename = 'postcode-walk.pdf'; // Default filename
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+                    if (filenameMatch && filenameMatch.length > 1) {
+                        filename = filenameMatch[1];
+                    }
+                }
+                console.log(`Attempting to download file as: ${filename}`);
+
+                // Get the response body as a Blob
+                const blob = await response.blob();
+
+                // Create a temporary URL for the blob
+                const url = window.URL.createObjectURL(blob);
+
+                // Create a temporary link element to trigger the download
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename; 
+                document.body.appendChild(a);
+                a.click();
+
+                // Clean up
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                console.log("PDF download initiated successfully.");
+                // Optional: Show a success message to the user if needed
+                // alert("PDF download started!");
+
+            } catch (error) {
+                console.error("!!! ERROR calling backend PDF generation or processing response:", error.message, error);
+                // Ensure button is re-enabled even if error happens before the main reset
+                downloadPdfButton.textContent = originalButtonText;
+                downloadPdfButton.disabled = false;
+                // Show specific error message
+                alert(`Could not request PDF generation: ${error.message}`);
             }
         });
-        console.log("Attached click listener to download-pdf-btn");
+        console.log("Attached click listener to download-pdf-btn (calls backend)");
     } else {
         console.error("Download PDF button not found!");
     }
@@ -324,7 +337,6 @@ async function findRoutes() {
                  
                  // --- Second step: Append structured HTML to resultsDiv --- 
                  resultsDiv.innerHTML += `<h3>Found ${routes.length} Walk(s):</h3><ul id="route-summary-list">${routeListHtml}</ul><hr/>`;
-                 resultsDiv.innerHTML += instructionBlocksHtml.join(''); // Append all instruction blocks
                  
                  // --- Add click listener for route selection --- 
                  const routeListElement = document.getElementById('route-summary-list');
@@ -342,6 +354,7 @@ async function findRoutes() {
                  }
                  
                  // --- Store data for PDF --- 
+                 console.log("DEBUG: Checking downloadPdfButton before showing (one_way):", downloadPdfButton);
                  lastGeneratedRouteData = {
                      startPostcode: startPostcode,
                      desiredDistanceKm: desiredDistanceKm,
@@ -430,7 +443,6 @@ async function findRoutes() {
                     
                     // --- Second step: Append structured HTML to resultsDiv --- 
                     resultsDiv.innerHTML += `<h3>Found ${combinedRoundTrips.length} Round Trip(s):</h3><ul id="route-summary-list-rt">${routeListHtml}</ul><hr/>`;
-                    resultsDiv.innerHTML += instructionBlocksHtml.join(''); // Append all instruction blocks
                     
                     // --- Add click listener for route selection --- 
                     const routeListElementRT = document.getElementById('route-summary-list-rt');
@@ -448,6 +460,7 @@ async function findRoutes() {
                     }
                     
                     // --- Store data for PDF --- 
+                    console.log("DEBUG: Checking downloadPdfButton before showing (round_trip):", downloadPdfButton);
                     lastGeneratedRouteData = {
                         startPostcode: startPostcode,
                         desiredDistanceKm: desiredDistanceKm,
@@ -621,19 +634,23 @@ function buildGraph(nodes, ways) {
                                 const wayName = way.tags?.name || way.tags?.ref || `Way ${way.id}`; 
                                 
                                 // Add edge with way info
+                                const highwayTag = way.tags?.highway || 'unknown'; // Store the highway tag
+                                
                                 graph[node1Id].push({ 
                                     neighborId: node2Id, 
                                     length: length, 
                                     geometry: segmentGeometry, 
                                     wayId: way.id, 
-                                    wayName: wayName 
+                                    wayName: wayName,
+                                    highwayTag: highwayTag // Add tag to edge
                                 });
                                 graph[node2Id].push({ 
                                     neighborId: node1Id, 
                                     length: length, 
                                     geometry: segmentGeometry.slice().reverse(), 
                                     wayId: way.id, 
-                                    wayName: wayName 
+                                    wayName: wayName,
+                                    highwayTag: highwayTag // Add tag to edge
                                 });
                             } else {
                                 console.warn(`Skipping zero-length edge between ${node1Id} and ${node2Id}`);
@@ -867,7 +884,8 @@ async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
                     geometry: edge.geometry, 
                     length: edge.length, 
                     wayId: edge.wayId, 
-                    wayName: edge.wayName 
+                    wayName: edge.wayName, 
+                    highwayTag: edge.highwayTag // Copy tag from edge
                 };
                 const newSegments = [...segments, newSegment];
                 const newVisited = new Set(visited); // Create a new visited set for the new path
@@ -1104,7 +1122,8 @@ async function findWalkRoutes(graph, nodes, startNodeId, endLat, endLon) { // Ad
                     geometry: edgeGeometry, 
                     length: edgeLength, 
                     wayId: edgeWayId, 
-                    wayName: edgeWayName 
+                    wayName: edgeWayName, 
+                    highwayTag: edge.highwayTag // Copy tag from edge
                 };
                 const newSegments = [...current.segments, newSegment];
                 
@@ -1256,7 +1275,8 @@ async function findShortestPathAStar(graph, nodes, startNodeId, endNodeId) {
                         geometry: edge.geometry, 
                         length: edge.length, 
                         wayId: edge.wayId, 
-                        wayName: edge.wayName 
+                        wayName: edge.wayName,
+                        highwayTag: edge.highwayTag // Copy tag from edge
                     } 
                 };
                 gScore[v] = tentativeGScore;
@@ -1297,43 +1317,58 @@ function generateInstructions(routeSegments) {
 
     let instructionsList = [];
     let currentInstruction = null;
+    const MIN_DISTANCE_FOR_INSTRUCTION = 10; // Ignore very short segments unless they are turns maybe? Future enhancement.
 
     routeSegments.forEach((segment, index) => {
-        const wayName = segment.wayName || "Unnamed path";
+        // Use way name, fallback to 'Unnamed path/road'
+        const wayName = segment.wayName || "Unnamed path/road"; 
         const distance = segment.length;
 
         if (!currentInstruction) {
             // Start of the route
+            if (distance >= MIN_DISTANCE_FOR_INSTRUCTION) {
             currentInstruction = { wayName: wayName, distance: distance };
+            }
         } else if (wayName === currentInstruction.wayName) {
             // Continue on the same way
             currentInstruction.distance += distance;
         } else {
-            // Changed way - finalize previous instruction and start new one
-            // --- MODIFIED: Add plain text to array --- 
-            instructionsList.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+            // Changed way - finalize previous instruction if long enough and start new one
+            if (currentInstruction.distance >= MIN_DISTANCE_FOR_INSTRUCTION) {
+                // Round distance for display
+                const roundedDistance = currentInstruction.distance < 100 ? currentInstruction.distance.toFixed(0) : Math.round(currentInstruction.distance / 10) * 10;
+                 instructionsList.push(`Continue for approx. ${roundedDistance}m on ${currentInstruction.wayName}`);
+            }
+             // Start new instruction if long enough
+             if (distance >= MIN_DISTANCE_FOR_INSTRUCTION) {
             currentInstruction = { wayName: wayName, distance: distance };
+             } else {
+                 currentInstruction = null; // Reset if the new segment is too short
+             }
         }
 
-        // Add the last instruction if it exists
-        if (index === routeSegments.length - 1 && currentInstruction) {
-            // --- MODIFIED: Add plain text to array --- 
-             instructionsList.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
+        // Add the last instruction if it exists and meets criteria
+        if (index === routeSegments.length - 1 && currentInstruction && currentInstruction.distance >= MIN_DISTANCE_FOR_INSTRUCTION) {
+            const roundedDistance = currentInstruction.distance < 100 ? currentInstruction.distance.toFixed(0) : Math.round(currentInstruction.distance / 10) * 10;
+             instructionsList.push(`Continue for approx. ${roundedDistance}m on ${currentInstruction.wayName}`);
         }
     });
+    
+     // Catch case where the entire route is one segment but too short
+     if (instructionsList.length === 0 && currentInstruction && currentInstruction.distance < MIN_DISTANCE_FOR_INSTRUCTION && routeSegments.length === 1) {
+          instructionsList.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName} (Short segment)`);
+     } else if (instructionsList.length === 0 && !currentInstruction && routeSegments.length > 0) {
+         instructionsList.push("Route consists of very short segments. No detailed instructions generated.");
+     }
 
-    if (instructionsList.length === 0 && currentInstruction) {
-        // Handle cases where the entire route is on a single way
-        // --- MODIFIED: Add plain text to array --- 
-        instructionsList.push(`Walk approx. ${currentInstruction.distance.toFixed(0)}m on ${currentInstruction.wayName}`);
-    }
 
-    // --- MODIFIED: Format as numbered plain text list --- 
+    // Format as numbered list
     if (instructionsList.length > 0) {
-        // Add numbering and join with newlines
-        return instructionsList.map((instr, i) => `${i + 1}. ${instr}`).join("\n"); 
+        // Add endpoint description
+        instructionsList.push("You have reached your destination (or midpoint for round trip).");
+        return instructionsList.map((instr, i) => `${i + 1}. ${instr}`).join("\\n"); 
     } else {
-        return "Could not generate instructions from route segments."; // Return plain text
+        return "Could not generate detailed instructions (route may be too short or complex)."; // Return plain text
     }
 }
 
@@ -1343,8 +1378,6 @@ function generateInstructions(routeSegments) {
 function clearRoutes() {
     drawnRouteLayers.forEach(layer => map.removeLayer(layer));
     drawnRouteLayers = [];
-    // Hide download button when routes are cleared
-    if(downloadPdfButton) downloadPdfButton.hidden = true;
     // Optionally clear the results list too, or handle it where search starts
     // document.getElementById('results').innerHTML = '<h2>Results</h2>';
 }
@@ -1426,6 +1459,12 @@ function displaySelectedRoute(selectedIndex) {
     console.log(`Displaying details for route index: ${selectedIndex}`);
     if (!lastGeneratedRouteData || !lastGeneratedRouteData.routes || selectedIndex < 0 || selectedIndex >= lastGeneratedRouteData.routes.length) {
         console.error("Invalid index or no route data available to display.");
+        // Clear selection display if invalid
+        const instructionsDiv = document.getElementById('selected-route-instructions');
+        if (instructionsDiv) instructionsDiv.innerHTML = ''; 
+        document.querySelectorAll('.route-summary-item').forEach(item => item.classList.remove('selected-route'));
+        // Disable PDF button if selection is invalid
+        if (downloadPdfButton) downloadPdfButton.disabled = true; 
         return;
     }
 
@@ -1433,21 +1472,25 @@ function displaySelectedRoute(selectedIndex) {
     lastGeneratedRouteData.selectedIndex = selectedIndex; // Store for PDF
 
     // --- 1. Update Map --- 
-    clearRoutes();
+    clearRoutes(); // Clear previous drawings
     let selectedBounds = L.latLngBounds([]);
 
+    // Redraw routes, highlighting the selected one
     lastGeneratedRouteData.routes.forEach((route, index) => {
         const isSelected = (index === selectedIndex);
         const layer = drawRoute(route, index, isSelected); // Pass selection flag
         if (isSelected && layer) {
             selectedBounds.extend(layer.getBounds());
+        } else if (layer) {
+            // Optionally slightly dim non-selected routes further?
+            // layer.setStyle({ opacity: 0.4 }); 
         }
     });
 
-    // Re-add markers? Or assume clearRoutes doesn't remove them?
-    // For now, assume markers persist or are re-added elsewhere if needed.
+    // Re-add start/end markers if clearRoutes removes them (Assume it doesn't for now, adjust if needed)
+     // L.marker([startLat, startLon])... etc.
 
-    // Fit map to selected route
+    // Fit map to selected route bounds
     if (selectedBounds.isValid()) {
         try { map.fitBounds(selectedBounds.pad(0.1)); } 
         catch(e) { console.warn("Error fitting bounds to selected route", e); }
@@ -1457,20 +1500,28 @@ function displaySelectedRoute(selectedIndex) {
     const instructionsDiv = document.getElementById('selected-route-instructions');
     if (instructionsDiv) {
         const instructionsText = generateInstructions(selectedRoute.segments);
-        // Add a heading and the instructions (using innerHTML as generateInstructions returns text)
-        instructionsDiv.innerHTML = `<h3>Route ${selectedIndex + 1} Instructions:</h3><pre>${instructionsText}</pre>`; // Use <pre> for formatting newlines
+        // Add a heading and the instructions (using innerHTML or createTextNode)
+        // Use <pre> for basic formatting or generate proper HTML list
+        instructionsDiv.innerHTML = `<h3>Route ${selectedIndex + 1} Instructions:</h3><pre class="route-instruction-text">${instructionsText}</pre>`;
     } else {
         console.error("Could not find #selected-route-instructions div.");
     }
     
-    // Highlight the selected list item? (Optional UI enhancement)
-    document.querySelectorAll('.route-summary-item').forEach((item, index) => {
-        if (index === selectedIndex) {
+    // --- 3. Update Summary List Highlight ---
+    document.querySelectorAll('.route-summary-item').forEach((item) => {
+        // Use data attribute for reliable selection matching
+        if (parseInt(item.getAttribute('data-route-index')) === selectedIndex) {
             item.classList.add('selected-route'); // Add a class for styling
         } else {
             item.classList.remove('selected-route');
         }
     });
+
+    // --- 4. Enable PDF Button ---
+    if (downloadPdfButton) {
+        downloadPdfButton.disabled = false; // Enable button now that a valid route is selected
+        downloadPdfButton.textContent = "Generate Premium PDF"; // Set button text
+    }
 }
 
 // --- End of File --- 

@@ -17,3 +17,67 @@ div {
 label {
     margin-right: 5px;
 } 
+
+/* --- Route Summary Button Styles --- */
+#results ul { /* Target ULs within the results div */
+    list-style: none; /* Remove default list bullets */
+    padding: 0; 
+    margin-top: 10px;
+}
+
+.route-summary-item {
+    display: inline-block; /* Arrange buttons side-by-side if space allows */
+    background-color: #f0f0f0; /* Light grey background */
+    border: 1px solid #ccc;
+    border-radius: 4px; /* Rounded corners */
+    padding: 8px 12px; /* Padding inside the button */
+    margin: 5px; /* Spacing between buttons */
+    cursor: pointer; /* Indicate interactivity */
+    transition: background-color 0.2s ease; /* Smooth hover effect */
+    font-size: 0.9em;
+}
+
+.route-summary-item:hover {
+    background-color: #e0e0e0; /* Slightly darker on hover */
+}
+
+.route-summary-item.selected-route {
+    background-color: #cce5ff; /* Light blue background for selected */
+    border-color: #b8daff;
+    font-weight: bold; /* Make text bold for selected */
+}
+
+/* --- Spinner Style --- */
+.hidden {
+    display: none;
+}
+#loading-spinner {
+    border: 4px solid #f3f3f3; /* Light grey */
+    border-top: 4px solid #3498db; /* Blue */
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: spin 1s linear infinite;
+    margin: 10px auto; /* Center the spinner */
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* --- Instructions Area --- */
+#selected-route-instructions {
+    margin-top: 15px;
+    padding: 10px;
+    border: 1px dashed #eee;
+    background-color: #fafafa;
+    min-height: 50px; /* Ensure it's visible even when empty */
+}
+
+#selected-route-instructions pre {
+    white-space: pre-wrap; /* Wrap long lines */
+    word-wrap: break-word; /* Break words if needed */
+    margin: 0; /* Remove default pre margin */
+    font-size: 0.9em; 
+} 
