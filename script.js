@@ -364,13 +364,13 @@ async function findRoutes() {
                      if (routeLayer) {
                          combinedBounds.extend(routeLayer.getBounds());
                      }
+
+                     // --- ADD Instructions for THIS route --- 
+                     const instructionsHtml = generateInstructions(route.segments);
+                     resultsDiv.innerHTML += `<div class="route-instructions">${instructionsHtml}</div>`; // Add inside loop
                  });
 
                  resultsDiv.innerHTML += `</ul>`;
-                 // Instructions only for first route for now
-                 const instructionsHtml = generateInstructions(routes[0].segments); 
-                 document.getElementById('results').innerHTML += instructionsHtml;
-                 
                  // Show download button (if any routes found)
                  if(downloadPdfButton) downloadPdfButton.hidden = false;
                  
@@ -444,13 +444,13 @@ async function findRoutes() {
                          if (routeLayer) {
                             combinedBounds.extend(routeLayer.getBounds());
                          }
+                         // --- ADD Instructions for THIS route --- 
+                         const instructionsHtml = generateInstructions(roundTrip.segments);
+                         resultsDiv.innerHTML += `<div class="route-instructions">${instructionsHtml}</div>`; // Add inside loop
                     });
                     
                     resultsDiv.innerHTML += `</ul>`;
-                    // Instructions only for first round trip for now
-                    const instructionsHtml = generateInstructions(combinedRoundTrips[0].segments);
-                    document.getElementById('results').innerHTML += instructionsHtml;
-                    
+                    // Show download button (if any routes found)
                     if(downloadPdfButton) downloadPdfButton.hidden = false;
                     
                     try {
@@ -1140,7 +1140,7 @@ async function findWalkRoutes(graph, nodes, startNodeId, endLat, endLon) { // Ad
         
         // Generate and display instructions
         const instructionsHtml = generateInstructions(shortestRoute.segments);
-        document.getElementById('results').innerHTML += instructionsHtml;
+        resultsDiv.innerHTML += `<div class="route-instructions">${instructionsHtml}</div>`;
 
         // Fit map to the route bounds
         try {
