@@ -331,122 +331,147 @@ async function findRoutes() {
 
         // --- Branch based on walk type --- 
         if (walkType === 'one_way') {
-            console.log("Finding one-way walk...");
-            resultsDiv.innerHTML += `<p>Searching for a one-way walk near ${desiredDistanceKm} km...</p>`;
-            const route = await findWalkNearDistance(graph, nodes, startNodeId, desiredDistanceMeters);
+            console.log("Finding one-way walks..."); // Plural
+            resultsDiv.innerHTML += `<p>Searching for one-way walks near ${desiredDistanceKm} km...</p>`;
+            // --- MODIFIED: Expect an array of routes --- 
+            const routes = await findWalkNearDistance(graph, nodes, startNodeId, desiredDistanceMeters);
 
-            // Process route result (existing logic)
-            if (route && route.segments && route.segments.length > 0) {
-                 console.log(`Found walk: Length=${route.length.toFixed(0)}m, Segments=${route.segments.length}`);
-                 resultsDiv.innerHTML += `<h3>Found Walk:</h3><ul>`;
-                 resultsDiv.innerHTML += `<li>Approx. Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)</li>`;
-                 if (nodes && route.path && route.path.length > 0) {
-                      const endNodeId = route.path[route.path.length - 1];
-                      const endNodeCoords = nodes[endNodeId];
-                      if(endNodeCoords) {
-                          L.marker([endNodeCoords.lat, endNodeCoords.lon]).addTo(map)
-                              .bindPopup(`End (Node ${endNodeId})`);
-                      }
-                 }
-                 drawRoute(route, 0);
+            // --- MODIFIED: Process array of routes --- 
+            if (routes && routes.length > 0) {
+                 console.log(`Found ${routes.length} walk(s).`);
+                 resultsDiv.innerHTML += `<h3>Found ${routes.length} Walk(s):</h3><ul>`;
+                 let combinedBounds = L.latLngBounds([]); // To fit map later
+
+                 // --- Loop through routes --- 
+                 routes.forEach((route, index) => {
+                     console.log(` -> Route ${index + 1}: Length=${route.length.toFixed(0)}m, Segments=${route.segments.length}`);
+                     resultsDiv.innerHTML += `<li>Route ${index + 1} Approx. Length: ${(route.length / 1000).toFixed(1)} km (${route.length.toFixed(0)}m)</li>`;
+                     
+                     // Add end marker for each route
+                     if (nodes && route.path && route.path.length > 0) {
+                          const endNodeId = route.path[route.path.length - 1];
+                          const endNodeCoords = nodes[endNodeId];
+                          if(endNodeCoords) {
+                              L.marker([endNodeCoords.lat, endNodeCoords.lon]).addTo(map)
+                                  .bindPopup(`End (Route ${index + 1})`);
+                              // Extend bounds with markers too
+                              combinedBounds.extend([endNodeCoords.lat, endNodeCoords.lon]);
+                          }
+                     }
+                     // Draw route with index for color
+                     const routeLayer = drawRoute(route, index); 
+                     // Extend bounds if route was drawn
+                     if (routeLayer) {
+                         combinedBounds.extend(routeLayer.getBounds());
+                     }
+                 });
+
                  resultsDiv.innerHTML += `</ul>`;
-                 const instructionsHtml = generateInstructions(route.segments);
+                 // Instructions only for first route for now
+                 const instructionsHtml = generateInstructions(routes[0].segments); 
                  document.getElementById('results').innerHTML += instructionsHtml;
-                 // Show download button
-                 console.log("Before attempting to show PDF button (one-way)"); // DEBUG
+                 
+                 // Show download button (if any routes found)
                  if(downloadPdfButton) downloadPdfButton.hidden = false;
-                 console.log("After attempting to show PDF button (one-way). Hidden state:", downloadPdfButton ? downloadPdfButton.hidden : 'Button not found'); // DEBUG
+                 
+                 // Fit map to combined bounds
                  try {
-                     const routeLine = L.polyline(route.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
-                     if (routeLine.getLatLngs().length > 0) {
-                          map.fitBounds(routeLine.getBounds().pad(0.1)); 
+                     if (combinedBounds.isValid()) {
+                          map.fitBounds(combinedBounds.pad(0.1)); 
                      }
                  } catch (e) {
-                     console.error("Error fitting map bounds to route:", e);
+                     console.error("Error fitting map bounds to routes:", e);
                  }
             } else {
-                 resultsDiv.innerHTML = `<p>Could not find a suitable one-way walk near ${desiredDistanceKm} km.</p>`;
+                 resultsDiv.innerHTML += `<p>Could not find any suitable one-way walks near ${desiredDistanceKm} km.</p>`; // Updated message
                  alert(`Could not find a walk. Try a different distance or start point.`);
+                 // No button if no routes
             }
 
         } else if (walkType === 'round_trip') {
-            console.log("Finding round trip walk...");
+            console.log("Finding round trip walks..."); // Plural
             const outwardTargetDistance = desiredDistanceMeters / 2;
-            resultsDiv.innerHTML += `<p>Searching for outward path near ${(outwardTargetDistance / 1000).toFixed(1)} km...</p>`;
+            resultsDiv.innerHTML += `<p>Searching for outward paths near ${(outwardTargetDistance / 1000).toFixed(1)} km...</p>`;
             
-            const outwardRoute = await findWalkNearDistance(graph, nodes, startNodeId, outwardTargetDistance);
+            // --- MODIFIED: Get multiple outward routes --- 
+            const outwardRoutes = await findWalkNearDistance(graph, nodes, startNodeId, outwardTargetDistance);
 
-            if (outwardRoute && outwardRoute.segments && outwardRoute.segments.length > 0) {
-                console.log(`Found outward path: Length=${outwardRoute.length.toFixed(0)}m`);
-                // Display outward path temporarily or keep it? Let's clear it before drawing combined.
-                // drawRoute(outwardRoute, 1); 
-                // resultsDiv.innerHTML += `<h3>Found Outward Path...</h3>`;
+            if (outwardRoutes && outwardRoutes.length > 0) {
+                console.log(`Found ${outwardRoutes.length} potential outward path(s). Attempting to find return paths...`);
                 
-                // --- Find Return Path using A* --- 
-                resultsDiv.innerHTML += `<p>Searching for return path...</p>`;
-                const midpointNodeId = outwardRoute.path[outwardRoute.path.length - 1];
-                console.log(`Finding return path from midpoint node ${midpointNodeId} to start node ${startNodeId}`);
-                
-                const returnRoute = await findShortestPathAStar(graph, nodes, midpointNodeId, startNodeId);
+                const combinedRoundTrips = [];
+                let combinedBounds = L.latLngBounds([]); // To fit map later
+                // Add start postcode marker location to bounds initially
+                // Need startCoords from earlier try/catch block - might need refactoring later
+                // if (startCoords) combinedBounds.extend([startCoords.latitude, startCoords.longitude]);
 
-                if (returnRoute && returnRoute.segments && returnRoute.segments.length > 0) {
-                    console.log(`Found return path: Length=${returnRoute.length.toFixed(0)}m`);
+                // --- Loop through outward routes to find return paths --- 
+                for (const outwardRoute of outwardRoutes) { 
+                    console.log(` -> Processing outward path: Length=${outwardRoute.length.toFixed(0)}m`);
+                    const midpointNodeId = outwardRoute.path[outwardRoute.path.length - 1];
+                    console.log(`    Finding return path from midpoint node ${midpointNodeId} to start node ${startNodeId}`);
                     
-                    // Combine Routes
-                    const totalLength = outwardRoute.length + returnRoute.length;
-                    const combinedSegments = outwardRoute.segments.concat(returnRoute.segments);
-                    // Combine paths for potential future use, though not strictly needed for drawing/instructions
-                    const combinedPath = outwardRoute.path.concat(returnRoute.path.slice(1)); // Avoid duplicating midpoint
-                    const combinedRoute = { length: totalLength, segments: combinedSegments, path: combinedPath };
+                    const returnRoute = await findShortestPathAStar(graph, nodes, midpointNodeId, startNodeId);
 
-                    console.log(`Combined round trip: Length=${totalLength.toFixed(0)}m, Segments=${combinedSegments.length}`);
-                    resultsDiv.innerHTML += `<h3>Round Trip Found:</h3><ul>`;
-                    resultsDiv.innerHTML += `<li>Total Approx. Length: ${(totalLength / 1000).toFixed(1)} km (${totalLength.toFixed(0)}m)</li>`;
+                    if (returnRoute && returnRoute.segments && returnRoute.segments.length > 0) {
+                        console.log(`    Found return path: Length=${returnRoute.length.toFixed(0)}m`);
+                        
+                        // Combine Routes
+                        const totalLength = outwardRoute.length + returnRoute.length;
+                        const combinedSegments = outwardRoute.segments.concat(returnRoute.segments);
+                        const combinedPath = outwardRoute.path.concat(returnRoute.path.slice(1)); // Avoid duplicating midpoint
+                        const combinedRoute = { length: totalLength, segments: combinedSegments, path: combinedPath };
+                        combinedRoundTrips.push(combinedRoute);
+                        console.log(`    Combined round trip created: Length=${totalLength.toFixed(0)}m, Segments=${combinedSegments.length}`);
+                    } else {
+                        console.warn(`    Could not find return path for outward route ending at ${midpointNodeId}.`);
+                    }
+                } // End loop through outward routes
+
+                // --- Process the combined round trips --- 
+                if (combinedRoundTrips.length > 0) {
+                    console.log(`Successfully generated ${combinedRoundTrips.length} complete round trip(s).`);
+                    resultsDiv.innerHTML += `<h3>Found ${combinedRoundTrips.length} Round Trip(s):</h3><ul>`;
                     
-                    // Clear previous single path drawing before drawing combined
-                    clearRoutes(); 
-                    L.marker([startCoords.latitude, startCoords.longitude]).addTo(map)
-                        .bindPopup(`Start/End: ${startCoords.postcode}`)
-                        .openPopup(); // Re-add start marker if cleared
-
-                    drawRoute(combinedRoute, 0); // Draw combined route in red
-                    console.log("DEBUG: After drawRoute(combinedRoute)"); // DEBUG
+                    // Clear previous single path drawing & re-add start marker IF clearRoutes was called at start
+                    // clearRoutes(); 
+                    // L.marker([startCoords.latitude, startCoords.longitude]).addTo(map).bindPopup(`Start/End: ${startCoords.postcode}`).openPopup();
+                    
+                    combinedRoundTrips.forEach((roundTrip, index) => {
+                         console.log(` -> Round Trip ${index + 1}: Length=${roundTrip.length.toFixed(0)}m, Segments=${roundTrip.segments.length}`);
+                         resultsDiv.innerHTML += `<li>Round Trip ${index + 1} Approx. Length: ${(roundTrip.length / 1000).toFixed(1)} km (${roundTrip.length.toFixed(0)}m)</li>`;
+                         const routeLayer = drawRoute(roundTrip, index); // Draw with index color
+                         if (routeLayer) {
+                            combinedBounds.extend(routeLayer.getBounds());
+                         }
+                    });
+                    
                     resultsDiv.innerHTML += `</ul>`;
-                    console.log("DEBUG: After adding closing ul"); // DEBUG
-                    
-                    const instructionsHtml = generateInstructions(combinedSegments);
-                    console.log("DEBUG: After generateInstructions"); // DEBUG
+                    // Instructions only for first round trip for now
+                    const instructionsHtml = generateInstructions(combinedRoundTrips[0].segments);
                     document.getElementById('results').innerHTML += instructionsHtml;
-                    console.log("DEBUG: After adding instructionsHtml"); // DEBUG
                     
-                    // Show download button
-                    console.log("Before attempting to show PDF button (round-trip)"); // Existing DEBUG
                     if(downloadPdfButton) downloadPdfButton.hidden = false;
-                    console.log("After attempting to show PDF button (round-trip). Hidden state:", downloadPdfButton ? downloadPdfButton.hidden : 'Button not found'); // Existing DEBUG
-
-                    // Fit map
-                    console.log("DEBUG: Before map.fitBounds try block"); // DEBUG
+                    
                     try {
-                         const routeLine = L.polyline(combinedRoute.segments.map(seg => seg.geometry.map(coord => [coord[1], coord[0]])).flat());
-                         if (routeLine.getLatLngs().length > 0) {
-                              map.fitBounds(routeLine.getBounds().pad(0.1)); 
+                         if (combinedBounds.isValid()) {
+                              map.fitBounds(combinedBounds.pad(0.1)); 
                          }
                      } catch (e) {
-                         console.error("Error fitting map bounds to combined route:", e);
+                         console.error("Error fitting map bounds to combined routes:", e);
                      }
 
                 } else {
-                    // Found outward, but no return path
-                    resultsDiv.innerHTML = `<p>Found an outward path of approx. ${(outwardRoute.length/1000).toFixed(1)} km, but could not find a path back to the start.</p>`;
-                    alert("Could not find a return path back to the start point.");
-                    // Keep the outward path drawn in this case
-                    drawRoute(outwardRoute, 1); 
+                    // Found outward path(s), but no return path(s) worked
+                    resultsDiv.innerHTML += `<p>Found suitable outward path(s), but could not find path(s) back to the start.</p>`;
+                    alert("Could not complete any round trips back to the start point.");
+                    // Maybe draw the outward paths anyway? Or just leave map as is.
                 }
-                // --- End Return Path Logic ---
+                // --- End processing combined trips --- 
 
             } else {
-                // No outward path found
-                resultsDiv.innerHTML = `<p>Could not find a suitable outward path near ${(outwardTargetDistance / 1000).toFixed(1)} km.</p>`; 
+                // No outward paths found
+                resultsDiv.innerHTML += `<p>Could not find any suitable outward paths near ${(outwardTargetDistance / 1000).toFixed(1)} km for a round trip.</p>`; 
                 alert(`Could not find an outward path. Try a different distance or start point.`);
             }
         
@@ -760,8 +785,11 @@ function processOsmData(osmData, startLat, startLon) {
 async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
     console.log(`Searching for walk near ${targetDistance}m starting from node ${startNodeId}`);
     const startTime = Date.now();
-    let bestRoute = null;
-    let minDiff = Infinity; // Minimum difference found so far
+    // --- MODIFIED: Store multiple routes --- 
+    const foundRoutes = []; 
+    const maxRoutesToReturn = 3;
+    // let bestRoute = null; // Replaced by foundRoutes
+    // let minDiff = Infinity; // No longer needed if we take first N valid routes
 
     // Use a stack for DFS: stores { nodeId, path, segments, currentLength }
     const stack = []; 
@@ -798,21 +826,23 @@ async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
 
         const { nodeId, path, segments, currentLength, visited } = stack.pop();
 
-        // Check if current path is a candidate
-        const diff = Math.abs(currentLength - targetDistance);
+        // Check if current path is a candidate within tolerance
+        // const diff = Math.abs(currentLength - targetDistance); // No longer tracking minimum diff
         if (currentLength >= lowerBound && currentLength <= upperBound) {
             // Found a path within tolerance
-            if (diff < minDiff) {
-                 console.log(`Found candidate route: Length ${currentLength.toFixed(0)}m (Diff: ${diff.toFixed(0)}m)`);
-                minDiff = diff;
-                bestRoute = { length: currentLength, path: path, segments: segments };
-                // Could potentially stop here if we only need the first acceptable route
-                // Or continue searching for one closer to the target distance
+            const newRoute = { length: currentLength, path: path, segments: segments };
+            console.log(`Found candidate route ${foundRoutes.length + 1}: Length ${currentLength.toFixed(0)}m`);
+            foundRoutes.push(newRoute);
+            // Stop searching if we have enough routes
+            if (foundRoutes.length >= maxRoutesToReturn) {
+                console.log(`Found ${maxRoutesToReturn} routes, stopping DFS.`);
+                break; // Exit the while loop
             }
+            // --- REMOVED minDiff tracking --- 
+            // if (diff < minDiff) { ... }
         }
         
         // If current path is already much longer than target, prune this branch
-        // (Add a more generous upper bound for pruning to allow finding routes slightly over)
         if (currentLength > targetDistance * 1.5) { // e.g. Prune if > 150% of target
             continue; 
         }
@@ -851,13 +881,15 @@ async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
     } // End while loop
 
     const endTime = Date.now();
-    if (bestRoute) {
-        console.log(`DFS finished in ${endTime - startTime}ms. Best route found: Length ${bestRoute.length.toFixed(0)}m (Target: ${targetDistance}m)`);
+    // --- MODIFIED: Log summary --- 
+    if (foundRoutes.length > 0) {
+        console.log(`DFS finished in ${endTime - startTime}ms. Found ${foundRoutes.length} route(s) near ${targetDistance}m.`);
     } else {
          console.log(`DFS finished in ${endTime - startTime}ms. No suitable route found near ${targetDistance}m.`);
     }
     
-    return bestRoute;
+    // --- MODIFIED: Return the array --- 
+    return foundRoutes; // Return array (might be empty)
 }
 
 // --- Step 6: Routing Algorithm ---
