@@ -383,149 +383,203 @@ async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
 }
 
 async function findShortestPathAStar(graph, nodes, startNodeId, endNodeId, outwardSegments = null) {
-    console.log(`Backend: Starting A* path (cost-based, penalty=${outwardSegments ? 'yes' : 'no'}) from ${startNodeId} to ${endNodeId}`);
-    const startTime = Date.now();
-    const PENALTY_FACTOR = 100.0; // Increased Penalty Factor
-
-    if (!graph || !nodes || !startNodeId || !endNodeId || !graph[startNodeId] || !nodes[endNodeId]) {
-         console.error("Backend: findShortestPathAStar called with invalid parameters!");
+    console.log(`Backend: A* Starting path search from ${startNodeId} to ${endNodeId}.`); // DIAGNOSTIC
+    if (!graph || Object.keys(graph).length === 0) {
+        console.error("Backend: A* cannot run - Graph is empty or null."); // DIAGNOSTIC
+        return null;
+    }
+    // Ensure startNodeId exists as a key in the graph (meaning it has outgoing edges)
+    if (!graph[String(startNodeId)] || !nodes[String(startNodeId)]) {
+        console.error(`Backend: A* cannot run - Start node ${startNodeId} not found in graph/nodes.`); // DIAGNOSTIC
+        return null;
+    }
+     // End node only needs to exist in the 'nodes' object for the heuristic.
+     if (!nodes[String(endNodeId)]) { 
+        console.error(`Backend: A* cannot run - End node ${endNodeId} not found in nodes object (needed for heuristic).`); // DIAGNOSTIC
         return null;
     }
 
+    const startNodeStr = String(startNodeId); // Ensure string keys
+    const endNodeStr = String(endNodeId);
+    const startTime = Date.now();
+    const PENALTY_FACTOR = 100.0; // Increased Penalty Factor
+
     // --- Create a set of outward edges for quick lookup --- 
     const outwardEdgeSet = new Set();
-    if (outwardSegments) {
+    const applyPenalty = outwardSegments && outwardSegments.length > 0;
+    if (applyPenalty) {
         console.log(`Backend: A* applying penalty using ${outwardSegments.length} outward segments.`);
         outwardSegments.forEach(segment => {
-            // Need to get node IDs from segment geometry
-            // Assuming segment.geometry = [[lon1, lat1], [lon2, lat2]]
-            // Find the node IDs corresponding to these coords (requires nodes lookup)
-            // This is inefficient - ideally graph edge should contain node IDs
-            // For now, we'll approximate by stringifying geometry and comparing?
-            // OR - Requires edge info to be passed IN segments. Let's assume segments
-            // now contain { ..., startNodeId: id1, endNodeId: id2 } ?
-            // Let's assume segments have node path info from findWalkNearDistance path
-            // outwardSegments is Array<{ geometry, length, cost, wayId, wayName, highwayTag }>
-            // We need the node IDs that form this segment. The graph edge HAS this info.
-            // Let's require the segments passed in to include node IDs.
             if (segment.startNodeId !== undefined && segment.endNodeId !== undefined) {
                  const u = Math.min(segment.startNodeId, segment.endNodeId);
                  const v = Math.max(segment.startNodeId, segment.endNodeId);
                  outwardEdgeSet.add(`${u}_${v}`);
             } else {
-                // Fallback or warning needed if node IDs aren't on segments
                  console.warn("Segment missing node IDs for penalty calculation");
             }
         });
          console.log(`Backend: Outward edge set size: ${outwardEdgeSet.size}`);
+    } else {
+         console.log(`Backend: A* No outward segments provided, penalty disabled.`); // LOGGING
     }
 
     const openSet = []; 
-    const cameFrom = {}; 
-    const gScore = {}; 
+    const cameFrom = {}; // Stores { nodeStr: {fromNode: nodeStr, segment: edgeInfo} }
+    const gScore = {};   // Stores { nodeStr: score }
 
-    Object.keys(graph).forEach(nodeId => { gScore[parseInt(nodeId)] = Infinity; });
-    gScore[startNodeId] = 0;
+    // Initialize gScore with string keys
+    Object.keys(graph).forEach(nodeStr => { gScore[nodeStr] = Infinity; });
+    // Also add nodes that might only be destinations (exist in 'nodes' but not 'graph' keys)
+    Object.keys(nodes).forEach(nodeStr => { 
+        if (gScore[nodeStr] === undefined) { gScore[nodeStr] = Infinity; }
+    });
 
-    const endNodeData = nodes[endNodeId];
+    gScore[startNodeStr] = 0;
+
+    const endNodeData = nodes[endNodeStr];
+    if (!endNodeData) { // Should be caught earlier, but double-check
+        console.error(`Backend: A* Critical - Failed to get coordinates for end node ${endNodeStr}.`); 
+        return null; 
+    }
     const endPoint = turf.point([endNodeData.lon, endNodeData.lat]);
-    const heuristic = (nodeId) => {
-        const nodeData = nodes[nodeId];
+    
+    // Heuristic: Use string ID
+    const heuristic = (nodeStr) => {
+        const nodeData = nodes[nodeStr];
         if (!nodeData) return Infinity; 
         const nodePoint = turf.point([nodeData.lon, nodeData.lat]);
+        // Using turf distance is more accurate than scaled Euclidean
         return turf.distance(nodePoint, endPoint, { units: 'meters' }); 
     };
 
-    openSet.push({ nodeId: startNodeId, f: heuristic(startNodeId) });
+    openSet.push({ nodeId: startNodeStr, f: heuristic(startNodeStr) });
 
+    const visitedNodes = new Set(); // Track nodes pulled from openSet
     let iterations = 0;
+    const MAX_ITERATIONS = 500000; // Safety break
+    let currentNodeStr = null; // Declare currentNodeStr outside the loop
+
     while (openSet.length > 0) {
         iterations++;
-        if (iterations % 5000 === 0) {
-            const elapsedTime = Date.now() - startTime;
-            if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
-                console.warn(`Backend: A* shortest path search timed out after ${elapsedTime}ms`);
-                return null; 
-            }
+        // Log detailed status periodically for debugging long runs/failures
+        if (iterations > MAX_ITERATIONS || iterations % 50000 === 0) { 
+            // Log based on the *next* node to be processed
+            console.log(`Backend: A* Status [Iter ${iterations}]: OpenSet=${openSet.length}, CurrentBestF=${openSet[0]?.f.toFixed(0)}, NextNode=${openSet[0]?.nodeId}`);
         }
 
-        const current = openSet.shift(); 
-        const u = current.nodeId;
+        if (iterations > MAX_ITERATIONS) {
+             console.warn(`Backend: A* MAX_ITERATIONS (${MAX_ITERATIONS}) reached, aborting search from ${startNodeStr} to ${endNodeStr}.`);
+            return null;
+        }
 
-        if (u === endNodeId) {
-            console.log(`Backend: A* found path to ${endNodeId} in ${iterations} iterations.`);
+        // Get node with lowest f score
+        openSet.sort((a, b) => a.f - b.f); // Keep sorted
+        const current = openSet.shift(); 
+        // Assign to the *outer* variable so it's available after the loop
+        currentNodeStr = current.nodeId; 
+
+        // Optimization: If we already found a better path to this node, skip
+        if (visitedNodes.has(currentNodeStr)) {
+             continue;
+        }
+        visitedNodes.add(currentNodeStr);
+
+        if (currentNodeStr === endNodeStr) {
+             console.log(`Backend: A* found path to ${endNodeStr} in ${iterations} iterations.`);
             // Reconstruct path
             const segments = [];
-            const pathNodes = [];
-            let curr = endNodeId;
-            let totalLength = 0; // Calculate length separately during reconstruction
-            while (cameFrom[curr]) {
-                pathNodes.push(curr);
-                const predInfo = cameFrom[curr];
+            const pathNodes = []; // Store string node IDs first
+            let tempNodeStr = endNodeStr;
+            let totalLength = 0; 
+
+            while (cameFrom[tempNodeStr]) {
+                pathNodes.push(tempNodeStr);
+                const predInfo = cameFrom[tempNodeStr];
                 segments.push(predInfo.segment); 
-                totalLength += predInfo.segment.length; // Sum length
-                curr = predInfo.fromNode;
+                totalLength += predInfo.segment.length; 
+                tempNodeStr = predInfo.fromNode;
             }
-            pathNodes.push(startNodeId); 
+            pathNodes.push(startNodeStr); 
             segments.reverse(); 
             pathNodes.reverse();
-            console.log(`Backend: Reconstructed A* path: Segments=${segments.length}, Length=${totalLength.toFixed(0)}m, Cost=${gScore[endNodeId].toFixed(0)}`);
+            
+            const finalCost = gScore[endNodeStr]; // Get the final calculated cost
+            console.log(`Backend: Reconstructed A* path: Segments=${segments.length}, Length=${totalLength.toFixed(0)}m, Cost=${finalCost.toFixed(0)}`);
+            
+            // Convert path back to numbers for consistency with rest of app
+            const pathNumbers = pathNodes.map(id => parseInt(id)); 
             return { 
-                length: totalLength, // Return actual length
-                cost: gScore[endNodeId], // Return calculated cost
+                length: totalLength, 
+                cost: finalCost,
                 segments: segments, 
-                path: pathNodes 
+                path: pathNumbers 
             };
         }
 
-        const neighbors = graph[u] || [];
+        // Explore neighbors (Handle case where node might not be in graph keys if it has no outgoing edges)
+        const neighbors = graph[currentNodeStr] || []; 
         for (const edge of neighbors) {
-            const v = edge.neighborId;
+            // edge.neighborId is a number from buildGraph
+            const neighborNodeStr = String(edge.neighborId); 
+
+            // Skip if already processed via an optimal path
+            if (visitedNodes.has(neighborNodeStr)) {
+                 continue; 
+            }
+
             let edgeCostForSearch = edge.cost; // Start with actual cost
 
             // Apply penalty if this edge was on the outward path
-            if (outwardSegments) {
-                const nodeU = Math.min(u, v);
-                const nodeV = Math.max(u, v);
-                const edgeId = `${nodeU}_${nodeV}`;
+            if (applyPenalty) {
+                // Ensure numeric IDs for comparison logic
+                const u = Math.min(parseInt(currentNodeStr), edge.neighborId);
+                const v = Math.max(parseInt(currentNodeStr), edge.neighborId);
+                const edgeId = `${u}_${v}`;
                 if (outwardEdgeSet.has(edgeId)) {
-                    edgeCostForSearch *= PENALTY_FACTOR;
-                    // console.log(`Penalizing edge ${edgeId}`); // Debug logging
+                    edgeCostForSearch *= PENALTY_FACTOR; 
                 }
             }
 
             // Use the potentially penalized cost for G score calculation
-            const tentativeGScore = gScore[u] + edgeCostForSearch; 
+            const tentativeGScore = gScore[currentNodeStr] + edgeCostForSearch; 
 
-            if (tentativeGScore < gScore[v]) {
+            // Check if this path to neighbor is better than any previous one
+            // Use string keys for gScore access
+            if (tentativeGScore < (gScore[neighborNodeStr] ?? Infinity)) { 
                 // Store the original edge info (with original cost) in cameFrom
-                cameFrom[v] = { 
-                    fromNode: u, 
+                // Ensure cameFrom uses string key for the node *being pointed to*
+                cameFrom[neighborNodeStr] = { 
+                    fromNode: currentNodeStr, // Key is the node *from* which we came
                     segment: { 
+                        // Make sure segment has numeric IDs for consistency later
+                        startNodeId: parseInt(currentNodeStr), 
+                        endNodeId: edge.neighborId, 
                         geometry: edge.geometry, length: edge.length, cost: edge.cost, // Store ACTUAL cost 
-                        wayId: edge.wayId, wayName: edge.wayName, highwayTag: edge.highwayTag,
-                        startNodeId: u, endNodeId: v // Store node IDs for penalty check later
+                        wayId: edge.wayId, wayName: edge.wayName, highwayTag: edge.highwayTag
                     } 
                 };
-                gScore[v] = tentativeGScore; // Store the gScore (potentially penalized)
-                const fScore = tentativeGScore + heuristic(v);
+                // Store the gScore (potentially penalized) using string key
+                gScore[neighborNodeStr] = tentativeGScore; 
+                const fScore = tentativeGScore + heuristic(neighborNodeStr);
                 
-                // Update priority queue
-                const existingIndex = openSet.findIndex(item => item.nodeId === v);
-                const newState = { nodeId: v, f: fScore };
-                if (existingIndex === -1) {
-                    const index = findSortedIndex(openSet, newState); 
-                    openSet.splice(index, 0, newState);
-                } else if (fScore < openSet[existingIndex].f) { 
-                    openSet.splice(existingIndex, 1); 
-                    const index = findSortedIndex(openSet, newState);
-                    openSet.splice(index, 0, newState); 
+                // Update priority queue (openSet) using string ID
+                const existingIndex = openSet.findIndex(item => item.nodeId === neighborNodeStr);
+                const newState = { nodeId: neighborNodeStr, f: fScore };
+                
+                if (existingIndex !== -1) { // If exists, remove old entry before adding new one
+                    openSet.splice(existingIndex, 1);
                 }
+                // Add new state and keep sorted (splice/findSortedIndex is inefficient for large sets)
+                // For simplicity here, push and re-sort is easier to implement than heap
+                openSet.push(newState);
+                // No need to sort every time, sort at the start of the loop
             }
         }
     }
 
-    console.log(`Backend: A* failed to find a path from ${startNodeId} to ${endNodeId}.`);
+    // If loop finishes and we haven't returned, the end node was not reachable
+    // currentNodeStr should now hold the ID of the last node actually processed
+    console.warn(`Backend: A* failed to find a path from ${startNodeStr} to ${endNodeStr}. Open set empty after ${iterations} iterations. Last node processed: ${currentNodeStr ?? 'None'}`); 
     return null; 
 }
 
