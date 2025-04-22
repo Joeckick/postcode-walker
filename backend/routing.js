@@ -382,6 +382,141 @@ async function findWalkNearDistance(graph, nodes, startNodeId, targetDistance) {
     return finalRoutes; 
 }
 
+// --- NEW FUNCTION: DFS Search Biased Towards a Bearing --- 
+async function findDirectedWalkNearDistance(graph, nodes, startNodeId, targetDistance, targetBearing, bearingTolerance = 45) {
+    console.log(`Backend: Searching (DFS) for walk near ${targetDistance}m from node ${startNodeId} towards bearing ${targetBearing.toFixed(1)}° (±${bearingTolerance}°).`);
+    const startTime = Date.now();
+    
+    let bestRoute = { route: null, cost: Infinity }; // Store the single best route found
+    let routesChecked = 0;
+    const startNodeCoords = nodes[startNodeId];
+
+    if (!startNodeCoords) {
+        console.error(`Backend: Cannot find coordinates for start node ${startNodeId}. Aborting directed DFS.`);
+        return null;
+    }
+
+    const stack = []; 
+    if (graph[startNodeId]) {
+        stack.push({ 
+            nodeId: startNodeId, path: [startNodeId], segments: [], 
+            currentLength: 0, currentCost: 0, 
+            visited: new Set([startNodeId])
+        });
+    } else {
+        console.error(`Backend: Start node ${startNodeId} not found in graph for directed DFS.`);
+        return null; 
+    }
+
+    let iterations = 0;
+    const tolerance = targetDistance * 0.2; // Reuse existing tolerance logic
+    const lowerBound = targetDistance - tolerance;
+    const upperBound = targetDistance + tolerance;
+    const initialExploreDistance = 200; // Allow exploring in any direction initially
+
+    // Helper function to check if bearing B is within target T +/- tolerance W
+    // Handles angle wrapping correctly.
+    const isBearingWithinTolerance = (bearing, target, tolerance) => {
+        if (bearing === null || bearing === undefined) return false;
+        const diff = Math.abs(target - bearing);
+        const wrappedDiff = Math.min(diff, 360 - diff);
+        return wrappedDiff <= tolerance;
+    };
+
+    while (stack.length > 0) {
+        iterations++;
+        if (iterations % 20000 === 0) { 
+            const elapsedTime = Date.now() - startTime;
+            if (elapsedTime > ROUTE_FINDING_TIMEOUT_MS) {
+                console.warn(`Backend: findDirectedWalkNearDistance DFS timed out after ${elapsedTime}ms`);
+                break; 
+            }
+            console.log(`  Directed DFS Iteration ${iterations}, Stack size ${stack.length}`);
+        }
+
+        const { nodeId, path, segments, currentLength, currentCost, visited } = stack.pop();
+        const currentNodeCoords = nodes[nodeId]; // Needed for bearing calculation
+        if (!currentNodeCoords) continue; // Should not happen if graph is consistent
+
+        // Check if DISTANCE is within tolerance
+        if (currentLength >= lowerBound && currentLength <= upperBound) {
+            routesChecked++;
+            // We don't strictly need the end bearing here, but check if it's the best route found so far
+            if (currentCost < bestRoute.cost) {
+                bestRoute = {
+                    route: { length: currentLength, cost: currentCost, path: path, segments: segments },
+                    cost: currentCost
+                };
+                // console.log(`    -> New best directed route found: Cost ${currentCost.toFixed(0)}, Length ${currentLength.toFixed(0)}`);
+            }
+        }
+        
+        // Pruning based on distance
+        if (currentLength > upperBound) continue; 
+
+        // Explore neighbors
+        const neighbors = graph[nodeId] || [];
+        const neighborsToExplore = []; // Store valid neighbors to potentially shuffle later
+
+        for (const edge of neighbors) {
+            const neighborId = edge.neighborId;
+            const neighborCoords = nodes[neighborId];
+
+            if (!visited.has(neighborId) && neighborCoords) {
+                let neighborBearing = null;
+                try {
+                    neighborBearing = turf.bearing(
+                        turf.point([currentNodeCoords.lon, currentNodeCoords.lat]),
+                        turf.point([neighborCoords.lon, neighborCoords.lat])
+                    );
+                    if (neighborBearing < 0) neighborBearing += 360;
+                } catch (e) { /* Ignore errors, treat as invalid bearing */ }
+
+                // Check bearing: Always allow exploration initially, then check tolerance
+                const withinBearing = isBearingWithinTolerance(neighborBearing, targetBearing, bearingTolerance);
+                
+                if (currentLength < initialExploreDistance || withinBearing) {
+                    // Store neighbor details for pushing onto stack
+                    neighborsToExplore.push({ edge, neighborId });
+                    // Optional: Log bearing check
+                    // if (currentLength >= initialExploreDistance) {
+                    //     console.log(`      -> Bearing Check: Node ${nodeId} to ${neighborId} = ${neighborBearing?.toFixed(1)}°, Target=${targetBearing.toFixed(1)}°, Within=${withinBearing}`);
+                    // }
+                } else {
+                     // Optional: Log pruning
+                    // console.log(`      -> Pruning neighbor ${neighborId}: Bearing ${neighborBearing?.toFixed(1)}° outside target ${targetBearing.toFixed(1)}° ±${bearingTolerance}°`);
+                }
+            }
+        }
+
+        // --- Push valid neighbors onto the stack --- 
+        // Optional: Shuffle neighborsToExplore to add randomness if needed?
+        // For now, push in the order found (usually consistent)
+        for (const { edge, neighborId } of neighborsToExplore) {
+            const newLength = currentLength + edge.length;
+            const newCost = currentCost + edge.cost; 
+            const newPath = [...path, neighborId];
+            const newSegment = { 
+                geometry: edge.geometry, length: edge.length, cost: edge.cost, 
+                wayId: edge.wayId, wayName: edge.wayName, highwayTag: edge.highwayTag,
+                startNodeId: nodeId, endNodeId: neighborId // Pass IDs through
+            };
+            const newSegments = [...segments, newSegment];
+            const newVisited = new Set(visited); 
+            newVisited.add(neighborId);
+            stack.push({
+                nodeId: neighborId, path: newPath, segments: newSegments,
+                currentLength: newLength, currentCost: newCost, 
+                visited: newVisited
+            });
+        }
+    } // End while loop
+
+    console.log(`Backend: Directed DFS finished. Checked ${routesChecked} routes within length tolerance. Returning best route found.`);
+
+    return bestRoute.route; // Return the route object itself, or null if none found
+}
+
 async function findShortestPathAStar(graph, nodes, startNodeId, endNodeId, outwardSegments = null) {
     console.log(`Backend: A* Starting path search from ${startNodeId} to ${endNodeId}.`); // DIAGNOSTIC
     if (!graph || Object.keys(graph).length === 0) {
@@ -590,6 +725,7 @@ module.exports = {
     fetchOsmDataInBbox,
     processOsmData,
     findWalkNearDistance,
+    findDirectedWalkNearDistance,
     findShortestPathAStar,
     calculateInitialBearing
 }; 
